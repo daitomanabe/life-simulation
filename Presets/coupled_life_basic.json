@@ -1,0 +1,127 @@
+{
+  "seed": 424242,
+  "resolution": [1280, 720],
+  "modules": [
+    {
+      "type": "Lenia",
+      "name": "lenia0",
+      "enabled": true,
+      "params": {
+        "radius": 13,
+        "dt": 0.35,
+        "growthMode": 1,
+        "growthMu": 0.15,
+        "growthSigma": 0.017,
+        "initCoverage": 0.42,
+        "initScale": 26.0,
+        "injectAmount": 0.15,
+        "injectCount": 4,
+        "blend": "add",
+        "opacity": 0.55,
+        "colorMap": {
+          "d": [0.62, 0.44, 0.30],
+          "channel": 0,
+          "inputScale": 1.0
+        }
+      }
+    },
+    {
+      "type": "AudioToField",
+      "name": "af0",
+      "enabled": true,
+      "params": {
+        "mode": 1,
+        "gain": 1.0,
+        "decay": 0.92,
+        "blend": "screen",
+        "opacity": 0.2,
+        "colorMap": {
+          "d": [0.58, 0.42, 0.25],
+          "channel": 0,
+          "inputScale": 1.0
+        }
+      }
+    },
+    {
+      "type": "SlimeMold",
+      "name": "slime0",
+      "enabled": true,
+      "params": {
+        "agentCount": 300000,
+        "moveSpeed": 55,
+        "sensorAngle": 0.6,
+        "sensorDistance": 9,
+        "turnSpeed": 10,
+        "depositAmount": 1.0,
+        "decayRate": 1.8,
+        "diffuseRate": 0.35,
+        "jitter": 0.4,
+        "spawnMode": 0,
+        "showAgents": 0,
+        "attractorWeight": 0.8,
+        "blend": "screen",
+        "opacity": 0.85
+      }
+    },
+    {
+      "type": "ReactionDiffusion",
+      "name": "rd0",
+      "enabled": true,
+      "params": {
+        "feed": 0.0545,
+        "kill": 0.062,
+        "Du": 1.0,
+        "Dv": 0.5,
+        "timeScale": 1.0,
+        "stepsPerFrame": 6,
+        "noiseAmount": 0.0,
+        "killPerturb": 0.0,
+        "initSpots": 12,
+        "initSpotRadius": 0.02,
+        "feedMapGain": 0.015,
+        "blend": "screen",
+        "opacity": 0.4,
+        "colorMap": {
+          "d": [0.50, 0.38, 0.28],
+          "channel": 1,
+          "inputScale": 2.2
+        }
+      }
+    },
+    {
+      "type": "ParticleLife",
+      "name": "pl0",
+      "enabled": true,
+      "params": {
+        "particleCount": 80000,
+        "species": 6,
+        "rMax": 24,
+        "beta": 0.3,
+        "forceScale": 60,
+        "friction": 4,
+        "maxSpeed": 160,
+        "jitter": 0,
+        "splatGain": 1.0,
+        "fieldForce": 40,
+        "blend": "add",
+        "opacity": 0.9
+      }
+    }
+  ],
+  "connections": [
+    { "from": "lenia0.field", "to": "slime0.attractorField", "mode": "sample" },
+    { "from": "slime0.trail", "to": "rd0.feedMap",           "mode": "sample" },
+    { "from": "rd0.field",    "to": "pl0.forceField",        "mode": "sample" }
+  ],
+  "audioMappings": [
+    { "source": "kick",          "target": "lenia0.injectAmount",  "scale": 0.7,  "smoothing": 0.08 },
+    { "source": "kick",          "target": "slime0.depositAmount", "scale": 1.0,  "smoothing": 0.08 },
+    { "source": "snare.trigger", "target": "pl0.shufflePulse",     "scale": 1.0,  "smoothing": 0.0  },
+    { "source": "snare.trigger", "target": "lenia0.muJitter",      "scale": 0.8,  "smoothing": 0.02 },
+    { "source": "hihat",         "target": "slime0.jitter",        "scale": 2.0,  "smoothing": 0.05 },
+    { "source": "hihat",         "target": "pl0.jitter",           "scale": 25,   "smoothing": 0.05 },
+    { "source": "beat.trigger",  "target": "slime0.resetPulse",    "scale": 0.5,  "smoothing": 0.02 },
+    { "source": "rms",           "target": "af0.gain",             "scale": 0.8,  "smoothing": 0.15 },
+    { "source": "kick",          "target": "pl0.forceBoost",       "scale": 1.0,  "smoothing": 0.08 }
+  ]
+}

@@ -25,6 +25,7 @@ struct SlimeParams {
     uint frameIndex;
     uint width;
     uint height;
+    float attractorWeight; // Phase 5: weight of attractorField in the sensor read
 };
 
 // Advances a per-agent PCG stream held in thread-local state and returns the
@@ -109,6 +110,7 @@ kernel void slimeMove(device float2* positions [[buffer(0)]],
                       device uint* randomState [[buffer(2)]],
                       device atomic_uint* deposit [[buffer(3)]],
                       texture2d<float, access::sample> trail [[texture(0)]],
+                      texture2d<float, access::sample> attractor [[texture(1)]],
                       constant SlimeParams& p [[buffer(4)]],
                       constant AudioUniforms& audio [[buffer(5)]],
                       uint id [[thread_position_in_grid]]) {
@@ -131,9 +133,16 @@ kernel void slimeMove(device float2* positions [[buffer(0)]],
     float2 dirL = float2(cos(baseAngle + sensorAngleEff), sin(baseAngle + sensorAngleEff));
     float2 dirR = float2(cos(baseAngle - sensorAngleEff), sin(baseAngle - sensorAngleEff));
 
-    float F = sampleFieldWrap(trail, pos + dirF * p.sensorDistance, w, h);
-    float L = sampleFieldWrap(trail, pos + dirL * p.sensorDistance, w, h);
-    float R = sampleFieldWrap(trail, pos + dirR * p.sensorDistance, w, h);
+    // Phase 5 §3a: sensed value blends the trail with an externally-coupled
+    // attractor field (e.g. a Lenia density), weighted by attractorWeight.
+    // attractor is a 4x4 black fallback when no scene connection targets
+    // "attractorField", so this is a no-op (sense == trail-only) by default.
+    float F = sampleFieldWrap(trail, pos + dirF * p.sensorDistance, w, h) +
+              p.attractorWeight * sampleFieldWrap(attractor, pos + dirF * p.sensorDistance, w, h);
+    float L = sampleFieldWrap(trail, pos + dirL * p.sensorDistance, w, h) +
+              p.attractorWeight * sampleFieldWrap(attractor, pos + dirL * p.sensorDistance, w, h);
+    float R = sampleFieldWrap(trail, pos + dirR * p.sensorDistance, w, h) +
+              p.attractorWeight * sampleFieldWrap(attractor, pos + dirR * p.sensorDistance, w, h);
 
     // Jones 2010 standard steer: go straight when the front sensor leads,
     // turn toward the stronger side sensor, and pick randomly when the

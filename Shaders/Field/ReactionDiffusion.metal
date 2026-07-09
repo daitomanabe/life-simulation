@@ -18,6 +18,7 @@ struct RDParams {
     float initSpotRadius;
     uint width;
     uint height;
+    float feedMapGain; // Phase 5: gain on the sampled feedMap input
 };
 
 kernel void rdInit(texture2d<float, access::write> state [[texture(0)]],
@@ -48,6 +49,7 @@ kernel void rdInit(texture2d<float, access::write> state [[texture(0)]],
 
 kernel void rdStep(texture2d<float, access::read> src [[texture(0)]],
                    texture2d<float, access::write> dst [[texture(1)]],
+                   texture2d<float, access::sample> feedMap [[texture(2)]],
                    constant RDParams& p [[buffer(0)]],
                    constant AudioUniforms& audio [[buffer(1)]],
                    uint2 gid [[thread_position_in_grid]]) {
@@ -79,9 +81,16 @@ kernel void rdStep(texture2d<float, access::read> src [[texture(0)]],
         killLocal += p.killPerturb * (n - 0.5f) * 0.08f;
     }
 
+    // Phase 5 §3b: feedMap locally modulates the feed rate (a coupled
+    // field, e.g. a slime trail) on top of the scene's base feed. feedMap
+    // is a 4x4 black fallback when unconnected, so feedLocal == p.feed by
+    // default.
+    float feedLocal = p.feed + p.feedMapGain *
+        sampleFieldWrap(feedMap, float2(gid), float(p.width), float(p.height));
+
     float reaction = A * B * B;
-    float A2 = A + (p.Du * lap.x - reaction + p.feed * (1.0f - A)) * p.dt;
-    float B2 = B + (p.Dv * lap.y + reaction - (killLocal + p.feed) * B) * p.dt;
+    float A2 = A + (p.Du * lap.x - reaction + feedLocal * (1.0f - A)) * p.dt;
+    float B2 = B + (p.Dv * lap.y + reaction - (killLocal + feedLocal) * B) * p.dt;
 
     if (p.noiseAmount > 0.0f) {
         float n = rand01(gid, 9103u, p.seed) - 0.5f;

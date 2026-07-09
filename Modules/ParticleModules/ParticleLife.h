@@ -31,6 +31,24 @@ public:
     TextureHandle outputTexture() const override { return output_; }
     ParticleSetHandle particles() const override { return set_.handle(); }
 
+    // Phase 5 coupling port (design doc §10): the splat IS the state, so
+    // only "output" is meaningful (no separate "field").
+    TextureHandle namedOutput(const std::string& port) const override {
+        if (port == "output") return outputTexture();
+        return {};
+    }
+    // forceField input (Phase 5 §3c): a central-difference gradient of this
+    // field adds to the per-particle force. Always bound — falls back to a
+    // 4x4 black (flat, zero-gradient) texture when no scene connection
+    // targets this port.
+    bool bindNamedInput(const std::string& port, TextureHandle h) override {
+        if (port == "forceField") {
+            fieldInput_ = h.valid() ? h : fieldFallback_;
+            return true;
+        }
+        return false;
+    }
+
 private:
     void regenerateMatrix();
 
@@ -53,8 +71,9 @@ private:
         float cellSize = 24.0f;
         uint32_t cellsX = 0;
         uint32_t cellsY = 0;
+        float fieldForce = 0.0f; // Phase 5: gain on the forceField gradient force
     };
-    static_assert(sizeof(PLParams) == 17 * 4,
+    static_assert(sizeof(PLParams) == 18 * 4,
                   "PLParams layout must stay scalar-packed to match MSL");
 
     ParticleSet2D set_;
@@ -72,6 +91,8 @@ private:
     bool needsInit_ = true;
     uint32_t width_ = 0;
     uint32_t height_ = 0;
+    TextureHandle fieldInput_;
+    TextureHandle fieldFallback_;
 };
 
 } // namespace life

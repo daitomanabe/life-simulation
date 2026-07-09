@@ -49,6 +49,19 @@ public:
     // resolve to a texture (§13.1); particles splat, fields color-map.
     virtual TextureHandle outputTexture() const = 0;
 
+    // Named output/input ports for inter-module coupling (Phase 5, design
+    // doc §10). SceneRunner resolves "moduleA.portX" -> "moduleB.portY"
+    // through these virtual calls — never dynamic_cast type-branching — so
+    // adding a new coupled module never touches SceneRunner. Defaults make
+    // an unconnected port a harmless no-op: namedOutput() on a port a
+    // module doesn't have returns an invalid handle, and bindNamedInput()
+    // on a port it doesn't accept returns false; either way the receiving
+    // module keeps sampling whatever fallback texture it bound at setup().
+    virtual TextureHandle namedOutput(const std::string& port) const { return {}; }
+    virtual bool bindNamedInput(const std::string& port, TextureHandle h) {
+        (void)port; (void)h; return false;
+    }
+
     const std::string& instanceName() const { return instanceName_; }
     bool enabled() const { return enabled_; }
     void setEnabled(bool e) { enabled_ = e; }

@@ -25,6 +25,14 @@ public:
     TextureHandle outputTexture() const override { return output_; }
     TextureHandle outputField() const override { return field_.read(); }
 
+    // Phase 5 coupling ports (design doc §10): "field" is the raw state,
+    // "output" the color-mapped RGBA visual.
+    TextureHandle namedOutput(const std::string& port) const override {
+        if (port == "field") return outputField();
+        if (port == "output") return outputTexture();
+        return {};
+    }
+
 private:
     // Mirrors AudioFieldParams in Shaders/Field/AudioToField.metal.
     struct AudioFieldParams {

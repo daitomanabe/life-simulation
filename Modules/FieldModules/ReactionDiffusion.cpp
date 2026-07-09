@@ -4,6 +4,8 @@
 #include "LifeCore/Math/Random.h"
 #include "LifeCore/Sim/SharedTypes.h"
 
+#include <vector>
+
 namespace life {
 
 void ReactionDiffusionModule::setup(SimulationContext& ctx) {
@@ -27,6 +29,23 @@ void ReactionDiffusionModule::setup(SimulationContext& ctx) {
     od.format = PixelFormat::RGBA16F;
     od.label = instanceName_ + ".output";
     output_ = ctx.resources->createTexture(od);
+
+    // 4x4 black fallback for the feedMap input port (Phase 5 §3b / design
+    // point 3): always bound so rdStep's texture argument is valid even
+    // when no scene connection targets "feedMap". Shared storage because
+    // uploadTexture requires CPU-visible memory (GPUPrivate can't be
+    // written from the CPU).
+    TextureDesc fbd;
+    fbd.width = 4;
+    fbd.height = 4;
+    fbd.format = PixelFormat::R16F;
+    fbd.storage = StorageMode::Shared;
+    fbd.label = instanceName_ + ".feedMapFallback";
+    feedMapFallback_ = ctx.resources->createTexture(fbd);
+    std::vector<uint8_t> zeros(size_t(fbd.width) * fbd.height * bytesPerPixel(fbd.format), 0);
+    ctx.resources->uploadTexture(feedMapFallback_, zeros.data(),
+                                 size_t(fbd.width) * bytesPerPixel(fbd.format));
+    feedMapInput_ = feedMapFallback_;
 
     colorMap_.configure(params_);
     gpuParams_.initSpots = params_.value("initSpots", 12u);
@@ -52,6 +71,7 @@ void ReactionDiffusionModule::encode(SimulationContext& ctx) {
     gpuParams_.kill = param(ctx, "kill", 0.061f);
     gpuParams_.noiseAmount = param(ctx, "noiseAmount", 0.0f);
     gpuParams_.killPerturb = param(ctx, "killPerturb", 0.0f);
+    gpuParams_.feedMapGain = param(ctx, "feedMapGain", 0.0f);
     gpuParams_.seed = seed_;
     // Gray-Scott's canonical explicit-Euler step is dt=1.0 per iteration;
     // timeScale lets scenes slow it down, substeps raise offline quality.
@@ -81,6 +101,7 @@ void ReactionDiffusionModule::encode(SimulationContext& ctx) {
             .pipeline("rdStep")
             .read(0, field_.read())
             .write(1, field_.write())
+            .read(2, feedMapInput_)
             .uniforms(0, gpuParams_)
             .uniforms(1, au)
             .dispatch2D(width_, height_);

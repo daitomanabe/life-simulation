@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <vector>
 
 namespace life {
 
@@ -84,6 +85,23 @@ void ParticleLifeModule::setup(SimulationContext& ctx) {
     od.label = instanceName_ + ".output";
     output_ = ctx.resources->createTexture(od);
 
+    // 4x4 black fallback for the forceField input port (Phase 5 §3c /
+    // design point 3): always bound so plStep's texture argument is valid
+    // even when no scene connection targets "forceField". Shared storage
+    // because uploadTexture requires CPU-visible memory (GPUPrivate can't
+    // be written from the CPU).
+    TextureDesc fbd;
+    fbd.width = 4;
+    fbd.height = 4;
+    fbd.format = PixelFormat::R16F;
+    fbd.storage = StorageMode::Shared;
+    fbd.label = instanceName_ + ".fieldFallback";
+    fieldFallback_ = ctx.resources->createTexture(fbd);
+    std::vector<uint8_t> zeros(size_t(fbd.width) * fbd.height * bytesPerPixel(fbd.format), 0);
+    ctx.resources->uploadTexture(fieldFallback_, zeros.data(),
+                                 size_t(fbd.width) * bytesPerPixel(fbd.format));
+    fieldInput_ = fieldFallback_;
+
     gpuParams_.particleCount = count;
     gpuParams_.speciesCount = K;
     gpuParams_.worldW = float(width_);
@@ -124,6 +142,7 @@ void ParticleLifeModule::encode(SimulationContext& ctx) {
     gpuParams_.maxSpeed = param(ctx, "maxSpeed", 160.0f);
     gpuParams_.jitter = param(ctx, "jitter", 0.0f);
     gpuParams_.forceBoost = param(ctx, "forceBoost", 0.0f);
+    gpuParams_.fieldForce = param(ctx, "fieldForce", 0.0f);
     gpuParams_.frameIndex = ctx.frameIndex;
 
     // snare.trigger → shufflePulse: regenerate the matrix on the frame the
@@ -175,6 +194,7 @@ void ParticleLifeModule::encode(SimulationContext& ctx) {
 
         ctx.graph->pass(instanceName_ + ".step")
             .pipeline("plStep")
+            .read(0, fieldInput_)
             .buffer(0, set_.positions())
             .buffer(1, set_.velocities())
             .buffer(2, set_.positionsWrite())

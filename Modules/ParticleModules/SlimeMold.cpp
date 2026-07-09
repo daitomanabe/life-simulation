@@ -5,6 +5,7 @@
 #include "LifeCore/Sim/SharedTypes.h"
 
 #include <algorithm>
+#include <vector>
 
 namespace life {
 
@@ -39,6 +40,23 @@ void SlimeMoldModule::setup(SimulationContext& ctx) {
     od.format = PixelFormat::RGBA16F;
     od.label = instanceName_ + ".output";
     output_ = ctx.resources->createTexture(od);
+
+    // 4x4 black fallback for the attractorField input port (Phase 5 §3a /
+    // design point 3): always bound so slimeMove's texture argument is
+    // valid even when no scene connection targets "attractorField". Shared
+    // storage because uploadTexture requires CPU-visible memory (GPUPrivate
+    // can't be written from the CPU).
+    TextureDesc fbd;
+    fbd.width = 4;
+    fbd.height = 4;
+    fbd.format = PixelFormat::R16F;
+    fbd.storage = StorageMode::Shared;
+    fbd.label = instanceName_ + ".attractorFallback";
+    attractorFallback_ = ctx.resources->createTexture(fbd);
+    std::vector<uint8_t> zeros(size_t(fbd.width) * fbd.height * bytesPerPixel(fbd.format), 0);
+    ctx.resources->uploadTexture(attractorFallback_, zeros.data(),
+                                 size_t(fbd.width) * bytesPerPixel(fbd.format));
+    attractorInput_ = attractorFallback_;
 
     gpuParams_.agentCount = pd.capacity;
     gpuParams_.width = width_;
@@ -76,6 +94,7 @@ void SlimeMoldModule::encode(SimulationContext& ctx) {
     gpuParams_.decayRate = param(ctx, "decayRate", 1.8f);
     gpuParams_.diffuseRate = param(ctx, "diffuseRate", 0.35f);
     gpuParams_.spawnMode = uint32_t(param(ctx, "spawnMode", 0.0f) + 0.5f);
+    gpuParams_.attractorWeight = param(ctx, "attractorWeight", 0.0f);
     gpuParams_.frameIndex = ctx.frameIndex;
 
     AudioUniforms au = toAudioUniforms(audio_);
@@ -121,6 +140,7 @@ void SlimeMoldModule::encode(SimulationContext& ctx) {
             .buffer(2, set_.randomState())
             .buffer(3, deposit_)
             .read(0, trail_.read())
+            .read(1, attractorInput_)
             .uniforms(4, gpuParams_)
             .uniforms(5, au)
             .dispatch1D(gpuParams_.agentCount);

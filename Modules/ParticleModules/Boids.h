@@ -26,6 +26,13 @@ public:
     TextureHandle outputTexture() const override { return output_; }
     ParticleSetHandle particles() const override { return set_.handle(); }
 
+    // Phase 5 coupling port (design doc §10): the splat IS the state, so
+    // only "output" is meaningful (no separate "field").
+    TextureHandle namedOutput(const std::string& port) const override {
+        if (port == "output") return outputTexture();
+        return {};
+    }
+
 private:
     // Mirrors BoidsParams in Shaders/Particle/Boids.metal.
     struct BoidsParams {

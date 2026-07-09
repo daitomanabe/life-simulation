@@ -75,6 +75,19 @@ public:
 private:
     SceneRunner() = default;
 
+    // Resolved module.connections entry (Phase 5, design doc §10): pointers
+    // into modules_, valid for the runner's lifetime since modules_ never
+    // grows/reallocates after create(). Only the module *names* are
+    // validated at resolve time; the *ports* are resolved every frame via
+    // namedOutput()/bindNamedInput() (see step()), which degrade gracefully
+    // if a module doesn't implement the requested port.
+    struct ResolvedConnection {
+        SimulationModule* src = nullptr;
+        std::string srcPort;
+        SimulationModule* dst = nullptr;
+        std::string dstPort;
+    };
+
     SceneRunnerDesc desc_;
     std::unique_ptr<MetalContext> metal_;
     std::unique_ptr<ResourcePool> resources_;
@@ -85,6 +98,7 @@ private:
     CompositePass composite_;
 
     std::vector<std::unique_ptr<SimulationModule>> modules_;
+    std::vector<ResolvedConnection> resolvedConnections_;
     std::vector<BlendMode> layerModes_;
     std::vector<float> layerOpacities_;
     TextureHandle renderTarget_;

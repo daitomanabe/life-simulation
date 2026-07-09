@@ -26,6 +26,7 @@ struct PLParams {
     float cellSize;
     uint cellsX;
     uint cellsY;
+    float fieldForce; // Phase 5: gain on the forceField gradient force
 };
 
 // Forward declaration: defined in ParticleSplat.metal, which is concatenated
@@ -57,7 +58,8 @@ kernel void plInit(device float2* posW [[buffer(0)]],
     randomState[id] = pcg_hash(id ^ p.seed);
 }
 
-kernel void plStep(device const float2* posR [[buffer(0)]],
+kernel void plStep(texture2d<float, access::sample> field [[texture(0)]],
+                   device const float2* posR [[buffer(0)]],
                    device const float2* velR [[buffer(1)]],
                    device float2* posW [[buffer(2)]],
                    device float2* velW [[buffer(3)]],
@@ -113,6 +115,19 @@ kernel void plStep(device const float2* posR [[buffer(0)]],
                 force += (d / r) * f;
             }
         }
+    }
+
+    // Phase 5 §3c: central-difference gradient of a coupled field adds a
+    // force (e.g. climb/descend a Reaction-Diffusion concentration). field
+    // is a 4x4 black fallback when unconnected, so this is a no-op by
+    // default (flat field -> zero gradient).
+    if (p.fieldForce != 0.0f) {
+        float e = 2.0f;
+        float gx = sampleFieldWrap(field, pi + float2(e, 0.0f), p.worldW, p.worldH) -
+                   sampleFieldWrap(field, pi - float2(e, 0.0f), p.worldW, p.worldH);
+        float gy = sampleFieldWrap(field, pi + float2(0.0f, e), p.worldW, p.worldH) -
+                   sampleFieldWrap(field, pi - float2(0.0f, e), p.worldW, p.worldH);
+        force += float2(gx, gy) * p.fieldForce;
     }
 
     float2 vel = velR[i] + force * p.forceScale * p.dt;

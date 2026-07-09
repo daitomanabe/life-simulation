@@ -68,6 +68,42 @@ std::unique_ptr<SceneRunner> SceneRunner::create(const SceneRunnerDesc& desc,
         return nullptr;
     }
 
+    // Resolve scene.connections into module-pointer pairs once, up front.
+    // "lenia0.field" -> name="lenia0", port="field"; no '.' means port
+    // defaults to "field". Only the module name is validated here (create
+    // fails if either endpoint doesn't exist) — the port is whatever the
+    // module makes of it every frame in step() (design point 2/3: no
+    // dynamic_cast, unsupported ports are a harmless no-op).
+    auto findModule = [&](const std::string& name) -> SimulationModule* {
+        for (auto& m : runner->modules_)
+            if (m->instanceName() == name) return m.get();
+        return nullptr;
+    };
+    auto splitPort = [](const std::string& s, std::string& name, std::string& port) {
+        auto dot = s.find('.');
+        if (dot == std::string::npos) {
+            name = s;
+            port = "field";
+        } else {
+            name = s.substr(0, dot);
+            port = s.substr(dot + 1);
+        }
+    };
+    for (const auto& c : desc.scene.connections) {
+        SceneRunner::ResolvedConnection rc;
+        std::string srcName, dstName;
+        splitPort(c.from, srcName, rc.srcPort);
+        splitPort(c.to, dstName, rc.dstPort);
+        rc.src = findModule(srcName);
+        rc.dst = findModule(dstName);
+        if (!rc.src || !rc.dst) {
+            outError = "connection references unknown module (\"" + c.from + "\" -> \"" +
+                       c.to + "\")";
+            return nullptr;
+        }
+        runner->resolvedConnections_.push_back(rc);
+    }
+
     runner->reset();
     return runner;
 }
@@ -95,6 +131,20 @@ void SceneRunner::step(const AudioFeatureState& audio, float dt, const StepOptio
     for (auto& m : modules_) m->updateCPU(audio);
 
     graph_->beginFrame(frameIndex_);
+
+    // Re-resolve every coupling connection immediately before the encode
+    // loop, EVERY frame — never once at setup. Ping-pong fields flip which
+    // physical texture is their "read" side inside the owning module's own
+    // encode(), so a handle captured at setup time would go stale the
+    // instant that module swapped for the first time. Binding here always
+    // captures each source's state as of the end of the PREVIOUS frame
+    // (the source's own encode() for this frame hasn't run yet), so the
+    // whole coupled pipeline runs with a deliberate, documented one-frame
+    // delay end to end (Phase 5 spec §2) — modules still encode below in
+    // scene.modules array order.
+    for (auto& c : resolvedConnections_)
+        c.dst->bindNamedInput(c.dstPort, c.src->namedOutput(c.srcPort));
+
     for (auto& m : modules_) m->encode(ctx);
 
     std::vector<CompositeLayer> layers;

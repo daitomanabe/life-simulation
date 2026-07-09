@@ -34,6 +34,24 @@ public:
     // Phase 5 field couplers to sample.
     TextureHandle outputField() const { return trail_.read(); }
 
+    // Phase 5 coupling ports (design doc §10): "field" and "trail" both
+    // expose the trail read side (SlimeMold has no separate color-mapped
+    // "field" state distinct from the trail itself).
+    TextureHandle namedOutput(const std::string& port) const override {
+        if (port == "field" || port == "trail") return outputField();
+        return {};
+    }
+    // attractorField input (Phase 5 §3a): blended into the sensor read
+    // alongside the trail. Always bound — falls back to a 4x4 black
+    // (zero-weight) texture when no scene connection targets this port.
+    bool bindNamedInput(const std::string& port, TextureHandle h) override {
+        if (port == "attractorField") {
+            attractorInput_ = h.valid() ? h : attractorFallback_;
+            return true;
+        }
+        return false;
+    }
+
 private:
     // Mirrors SlimeParams in Shaders/Particle/SlimeMold.metal.
     struct SlimeParams {
@@ -55,6 +73,7 @@ private:
         uint32_t frameIndex = 0;
         uint32_t width = 0;
         uint32_t height = 0;
+        float attractorWeight = 0.0f; // Phase 5: weight of attractorField in the sensor read
     };
 
     ParticleSet2D set_;
@@ -69,6 +88,8 @@ private:
     bool needsInit_ = true;
     uint32_t width_ = 0;
     uint32_t height_ = 0;
+    TextureHandle attractorInput_;
+    TextureHandle attractorFallback_;
 };
 
 } // namespace life
