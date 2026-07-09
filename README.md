@@ -14,15 +14,20 @@ snare → kernel/topology、hihat → micro noise、fft → force field）。
 |---|---|---|
 | 1 | Core 基盤 + Reaction Diffusion + 3 アプリ | ✅ 完了 |
 | 2 | Field 系完成 (Lenia / Cellular Automata / AudioToField) | ✅ 完了 |
-| 3 | Particle 系 (Slime Mold) | 未着手 |
-| 4 | Spatial Hash (Particle Life / Boids) | 未着手 |
-| 5 | Field×Particle Coupling | 未着手 (Scene JSON の `connections` はパース済み) |
+| 3 | Particle 系 (ParticleSet2D / ParticleSplat / Slime Mold) | ✅ 完了 |
+| 4 | Spatial Hash (Particle Life / Boids) | 実装中 |
+| 5 | Field×Particle Coupling | 仕様済み ([docs/specs/](docs/specs/)) |
+
+開発体制: 設計・レビュー・検証 = Fable、実装 = Sonnet サブエージェント。
+各フェーズの実装仕様書は `docs/specs/phaseN_*.md`。
 
 実測 (Apple M5 Max):
 - RD 単体 1080p: **0.47 ms/frame** (~2100 fps 容量)
 - Scene A (Lenia R13 + RD×8steps + CA + AudioToField + 4層 composite) 1080p:
   **7.75 ms/frame** (~129 fps 容量、支配項は Lenia direct convolution)
-- 決定性: 同一 seed → 同一出力 (PNG MD5 一致を確認済み)
+- Slime Mold 1M agents 1080p: **0.30 ms/frame** (~3400 fps 容量)
+- 決定性: 同一 seed → 同一出力 (PNG MD5 一致を確認済み、Slime は
+  整数 atomic 蓄積により粒子系でもバイト一致)
 
 ## ビルド
 
