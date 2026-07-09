@@ -1,0 +1,24 @@
+{
+  "seed": 1,
+  "resolution": [512, 512],
+  "modules": [
+    {
+      "type": "AudioToField",
+      "name": "af0",
+      "enabled": true,
+      "params": {
+        "mode": 1,
+        "gain": 1.2,
+        "decay": 0.94,
+        "blend": "add",
+        "opacity": 1.0,
+        "colorMap": {
+          "d": [0.62, 0.45, 0.28],
+          "channel": 0,
+          "inputScale": 1.0
+        }
+      }
+    }
+  ],
+  "audioMappings": []
+}

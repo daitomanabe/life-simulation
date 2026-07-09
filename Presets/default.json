@@ -1,0 +1,56 @@
+{
+  "seed": 1234,
+  "resolution": [1280, 720],
+  "modules": [
+    {
+      "type": "ReactionDiffusion",
+      "name": "rd0",
+      "enabled": true,
+      "params": {
+        "feed": 0.0545,
+        "kill": 0.062,
+        "Du": 1.0,
+        "Dv": 0.5,
+        "timeScale": 1.0,
+        "stepsPerFrame": 10,
+        "noiseAmount": 0.0,
+        "killPerturb": 0.0,
+        "initSpots": 14,
+        "initSpotRadius": 0.02,
+        "blend": "add",
+        "opacity": 1.0,
+        "colorMap": {
+          "a": [0.5, 0.5, 0.5],
+          "b": [0.5, 0.5, 0.5],
+          "c": [1.0, 1.0, 1.0],
+          "d": [0.55, 0.45, 0.32],
+          "channel": 1,
+          "inputScale": 2.5,
+          "inputBias": 0.0,
+          "exposure": 1.0
+        }
+      }
+    }
+  ],
+  "connections": [],
+  "audioMappings": [
+    {
+      "source": "kick",
+      "target": "rd0.feed",
+      "scale": 0.02,
+      "smoothing": 0.08
+    },
+    {
+      "source": "snare.trigger",
+      "target": "rd0.killPerturb",
+      "scale": 1.0,
+      "smoothing": 0.02
+    },
+    {
+      "source": "hihat",
+      "target": "rd0.noiseAmount",
+      "scale": 0.6,
+      "smoothing": 0.05
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+build/
+renders/
+frames/
+*.jsonl
+benchmark.json
+.DS_Store
+*.zip

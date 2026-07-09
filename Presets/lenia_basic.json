@@ -1,0 +1,76 @@
+{
+  "seed": 7777,
+  "resolution": [
+    768,
+    768
+  ],
+  "modules": [
+    {
+      "type": "Lenia",
+      "name": "lenia0",
+      "enabled": true,
+      "params": {
+        "radius": 13,
+        "dt": 0.35,
+        "growthMu": 0.15,
+        "growthSigma": 0.017,
+        "kernelShellMu": 0.5,
+        "kernelShellSigma": 0.15,
+        "initCoverage": 0.42,
+        "initScale": 26.0,
+        "noiseAmount": 0.0,
+        "muJitter": 0.0,
+        "blend": "add",
+        "opacity": 1.0,
+        "colorMap": {
+          "a": [
+            0.5,
+            0.5,
+            0.5
+          ],
+          "b": [
+            0.5,
+            0.5,
+            0.5
+          ],
+          "c": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "d": [
+            0.6,
+            0.42,
+            0.3
+          ],
+          "channel": 0,
+          "inputScale": 1.0,
+          "exposure": 1.0
+        },
+        "injectAmount": 0.22,
+        "injectCount": 4,
+        "growthMode": 1
+      }
+    }
+  ],
+  "audioMappings": [
+    {
+      "source": "kick",
+      "target": "lenia0.injectAmount",
+      "scale": 0.9,
+      "smoothing": 0.08
+    },
+    {
+      "source": "hihat",
+      "target": "lenia0.noiseAmount",
+      "scale": 0.5,
+      "smoothing": 0.05
+    },
+    {
+      "source": "snare.trigger",
+      "target": "lenia0.muJitter",
+      "scale": 1.0,
+      "smoothing": 0.02
+    }
+  ]
+}
