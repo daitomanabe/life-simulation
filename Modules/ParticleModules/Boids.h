@@ -32,6 +32,18 @@ public:
         if (port == "output") return outputTexture();
         return {};
     }
+    // flowField input (Phase 8 §3): a coupled velocity field (RG, px/s —
+    // the Fluid module's "velocity" output) that steers boid velocity like a
+    // global alignment force. Always bound — falls back to a 4x4 black
+    // (zero-flow) texture when no scene connection targets this port, so
+    // flowWeight defaulting to 0 is a true no-op either way.
+    bool bindNamedInput(const std::string& port, TextureHandle h) override {
+        if (port == "flowField") {
+            flowInput_ = h.valid() ? h : flowFallback_;
+            return true;
+        }
+        return false;
+    }
 
 private:
     // Mirrors BoidsParams in Shaders/Particle/Boids.metal.
@@ -56,8 +68,9 @@ private:
         uint32_t cellsX = 0;
         uint32_t cellsY = 0;
         float sepRadiusFrac = 0.35f;
+        float flowWeight = 0.0f; // Phase 8: weight of the flowField steering force
     };
-    static_assert(sizeof(BoidsParams) == 20 * 4,
+    static_assert(sizeof(BoidsParams) == 21 * 4,
                   "BoidsParams layout must stay scalar-packed to match MSL");
 
     ParticleSet2D set_;
@@ -70,6 +83,8 @@ private:
     bool needsInit_ = true;
     uint32_t width_ = 0;
     uint32_t height_ = 0;
+    TextureHandle flowInput_;
+    TextureHandle flowFallback_;
 };
 
 } // namespace life

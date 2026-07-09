@@ -1,0 +1,104 @@
+{
+  "seed": 606,
+  "resolution": [
+    1280,
+    720
+  ],
+  "modules": [
+    {
+      "type": "Fluid",
+      "name": "fluid0",
+      "enabled": true,
+      "params": {
+        "velDissipation": 0.015,
+        "dyeDissipation": 0.35,
+        "vorticity": 5.0,
+        "impulse": 30.0,
+        "impulseRadius": 60,
+        "turbulence": 0.0,
+        "injectHue": 0.0,
+        "jacobiIterations": 28,
+        "blend": "add",
+        "opacity": 0.85,
+        "dyeInject": 0.02
+      }
+    },
+    {
+      "type": "Boids",
+      "name": "boids0",
+      "enabled": true,
+      "params": {
+        "particleCount": 30000,
+        "radius": 18,
+        "sepWeight": 50,
+        "aliWeight": 35,
+        "cohWeight": 50,
+        "minSpeed": 60,
+        "maxSpeed": 170,
+        "jitter": 0,
+        "splatGain": 1.0,
+        "sepRadiusFrac": 0.35,
+        "flowWeight": 2.5,
+        "blend": "screen",
+        "opacity": 0.8
+      }
+    }
+  ],
+  "connections": [
+    {
+      "from": "fluid0.velocity",
+      "to": "boids0.flowField",
+      "mode": "sample"
+    }
+  ],
+  "audioMappings": [
+    {
+      "source": "kick",
+      "target": "fluid0.impulse",
+      "scale": 250.0,
+      "smoothing": 0.05
+    },
+    {
+      "source": "hihat",
+      "target": "fluid0.turbulence",
+      "scale": 1.5,
+      "smoothing": 0.05
+    },
+    {
+      "source": "beat.trigger",
+      "target": "fluid0.injectHue",
+      "scale": 0.13,
+      "smoothing": 0.0
+    },
+    {
+      "source": "kick",
+      "target": "boids0.sepBoost",
+      "scale": 1.5,
+      "smoothing": 0.06
+    },
+    {
+      "source": "perc",
+      "target": "boids0.impulse",
+      "scale": 250.0,
+      "smoothing": 0.03
+    },
+    {
+      "source": "snare.trigger",
+      "target": "boids0.scatterPulse",
+      "scale": 1.0,
+      "smoothing": 0.0
+    },
+    {
+      "source": "hihat",
+      "target": "boids0.jitter",
+      "scale": 25,
+      "smoothing": 0.05
+    },
+    {
+      "source": "kick",
+      "target": "fluid0.dyeInject",
+      "scale": 0.4,
+      "smoothing": 0.05
+    }
+  ]
+}

@@ -136,6 +136,7 @@ add_library(lifecore STATIC
   Modules/FieldModules/Lenia.cpp
   Modules/FieldModules/CellularAutomata.cpp
   Modules/FieldModules/AudioToField.cpp
+  Modules/FieldModules/Fluid.cpp
   Modules/ParticleModules/SlimeMold.cpp
   Modules/ParticleModules/ParticleLife.cpp
   Modules/ParticleModules/Boids.cpp

@@ -1,0 +1,53 @@
+{
+  "seed": 606,
+  "resolution": [
+    1280,
+    720
+  ],
+  "modules": [
+    {
+      "type": "Fluid",
+      "name": "fluid0",
+      "enabled": true,
+      "params": {
+        "velDissipation": 0.015,
+        "dyeDissipation": 0.35,
+        "vorticity": 5.0,
+        "impulse": 30.0,
+        "impulseRadius": 60,
+        "turbulence": 0.0,
+        "injectHue": 0.0,
+        "jacobiIterations": 28,
+        "blend": "add",
+        "opacity": 1.0,
+        "dyeInject": 0.02
+      }
+    }
+  ],
+  "audioMappings": [
+    {
+      "source": "kick",
+      "target": "fluid0.impulse",
+      "scale": 250.0,
+      "smoothing": 0.05
+    },
+    {
+      "source": "hihat",
+      "target": "fluid0.turbulence",
+      "scale": 1.5,
+      "smoothing": 0.05
+    },
+    {
+      "source": "beat.trigger",
+      "target": "fluid0.injectHue",
+      "scale": 0.13,
+      "smoothing": 0.0
+    },
+    {
+      "source": "kick",
+      "target": "fluid0.dyeInject",
+      "scale": 0.4,
+      "smoothing": 0.05
+    }
+  ]
+}

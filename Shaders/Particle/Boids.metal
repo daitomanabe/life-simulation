@@ -27,6 +27,7 @@ struct BoidsParams {
     uint cellsX;
     uint cellsY;
     float sepRadiusFrac; // separation acts only within radius*this (<1)
+    float flowWeight;    // Phase 8: weight of the flowField steering force
 };
 
 // Forward declaration: defined in ParticleSplat.metal, which is concatenated
@@ -54,7 +55,8 @@ kernel void boidsInit(device float2* posW [[buffer(0)]],
     randomState[id] = pcg_hash(id ^ p.seed);
 }
 
-kernel void boidsStep(device const float2* posR [[buffer(0)]],
+kernel void boidsStep(texture2d<float, access::sample> flowField [[texture(0)]],
+                      device const float2* posR [[buffer(0)]],
                       device const float2* velR [[buffer(1)]],
                       device float2* posW [[buffer(2)]],
                       device float2* velW [[buffer(3)]],
@@ -115,6 +117,18 @@ kernel void boidsStep(device const float2* posR [[buffer(0)]],
         float inv = 1.0f / float(count);
         acc += (aliSum * inv - vel) * p.aliWeight;
         acc += (cohSum * inv - pi) * p.cohWeight;
+    }
+
+    // Fluid coupling (Phase 8 §3): flowField steers velocity toward the
+    // sampled fluid velocity, the same shape as the alignment term above.
+    // flowGain is fixed at 1.0 — the Fluid module already builds its
+    // velocity field in px/s, the same units as vel here. flowWeight
+    // defaults to 0 (and the port falls back to a black/zero texture when
+    // unconnected), so this is a true no-op for every scene that doesn't
+    // opt in.
+    if (p.flowWeight != 0.0f) {
+        float2 flow = sampleFieldWrap4(flowField, pi, p.worldW, p.worldH).xy;
+        acc += (flow - vel) * p.flowWeight;
     }
 
     // perc -> random direction impulse.

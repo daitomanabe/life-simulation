@@ -5,6 +5,7 @@
 #include "LifeCore/Sim/SharedTypes.h"
 
 #include <algorithm>
+#include <vector>
 
 namespace life {
 
@@ -55,6 +56,23 @@ void BoidsModule::setup(SimulationContext& ctx) {
     od.label = instanceName_ + ".output";
     output_ = ctx.resources->createTexture(od);
 
+    // 4x4 black fallback for the flowField input port (Phase 8 §3 / design
+    // point 3): always bound so boidsStep's texture argument is valid even
+    // when no scene connection targets "flowField". Shared storage because
+    // uploadTexture requires CPU-visible memory (GPUPrivate can't be written
+    // from the CPU). RG16F is enough — only .xy is ever sampled.
+    TextureDesc fbd;
+    fbd.width = 4;
+    fbd.height = 4;
+    fbd.format = PixelFormat::RG16F;
+    fbd.storage = StorageMode::Shared;
+    fbd.label = instanceName_ + ".flowFallback";
+    flowFallback_ = ctx.resources->createTexture(fbd);
+    std::vector<uint8_t> zeros(size_t(fbd.width) * fbd.height * bytesPerPixel(fbd.format), 0);
+    ctx.resources->uploadTexture(flowFallback_, zeros.data(),
+                                 size_t(fbd.width) * bytesPerPixel(fbd.format));
+    flowInput_ = flowFallback_;
+
     gpuParams_.particleCount = count;
     gpuParams_.worldW = float(width_);
     gpuParams_.worldH = float(height_);
@@ -83,6 +101,7 @@ void BoidsModule::encode(SimulationContext& ctx) {
     gpuParams_.sepRadiusFrac = param(ctx, "sepRadiusFrac", 0.35f);
     gpuParams_.impulse = param(ctx, "impulse", 0.0f);
     gpuParams_.scatterPulse = param(ctx, "scatterPulse", 0.0f);
+    gpuParams_.flowWeight = param(ctx, "flowWeight", 0.0f);
     gpuParams_.frameIndex = ctx.frameIndex;
 
     AudioUniforms au = toAudioUniforms(audio_);
@@ -122,6 +141,7 @@ void BoidsModule::encode(SimulationContext& ctx) {
 
         ctx.graph->pass(instanceName_ + ".step")
             .pipeline("boidsStep")
+            .read(0, flowInput_)
             .buffer(0, set_.positions())
             .buffer(1, set_.velocities())
             .buffer(2, set_.positionsWrite())
