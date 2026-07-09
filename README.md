@@ -18,8 +18,8 @@ snare → kernel/topology、hihat → micro noise、fft → force field）。
 | 4 | Spatial Hash (Particle Life / Boids) | ✅ 完了 |
 | 5 | Field×Particle Coupling (connections 実働 / Scene D) | ✅ 完了 |
 | 6 | 出力抽象化 (OutputSink / Window Preview / Syphon) | ✅ 完了 |
-| 7 | LifePresetLab (sweep 探索 + ギャラリー) | 実装中 |
-| 8 | Fluid (Stable Fluids) + flowField 結合 | 仕様済み |
+| 7 | LifePresetLab (sweep 探索 + ギャラリー) | ✅ 完了 |
+| 8 | Fluid (Stable Fluids) + flowField 結合 | 実装中 |
 
 開発体制: 設計・レビュー・検証 = Fable、実装 = Sonnet サブエージェント。
 各フェーズの実装仕様書は `docs/specs/phaseN_*.md`。
@@ -92,6 +92,22 @@ PNG は ImageIO (macOS 標準) で書くため追加依存なし。
 
 pass 別 GPU 時間 (MTLCounterSampleBuffer, encoder 境界)、readback コスト、
 テクスチャ/バッファメモリを表示し JSON 保存。
+
+### LifePresetLab — パラメータ/seed 探索 (Phase 7)
+
+```bash
+./build/LifePresetLab --scene Presets/lenia_basic.json \
+    --sweep sweeps/lenia_mu_sigma.json \
+    --frames 240 --thumb-at 120,239 --width 384 --height 216 \
+    --output lab/run1
+```
+
+sweep JSON で `axes`（`values` か `range`+`steps`）× `seeds` を指定
+（`mode: "cartesian" | "per-axis"`）。シーン JSON を直接変異させるので
+radius / agentCount など setup 時パラメータも掃引可能。各 variant の
+サムネイル + activity 指標（輝度平均/分散 → alive 判定）+ 自己完結
+`index.html` ギャラリー（ソート・クリックで overrides 表示）を生成。
+`--resume` / `--alive-only` / `--audio capture.jsonl`（音反応込み探索）対応。
 
 ## Scene JSON
 
