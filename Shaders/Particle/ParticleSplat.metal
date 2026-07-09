@@ -53,3 +53,60 @@ kernel void splatResolve(device atomic_uint* density [[buffer(0)]],
     // needed once, before the first accumulate.
     atomic_store_explicit(&density[idx], 0u, memory_order_relaxed);
 }
+
+// ---- RGB splat (Phase 4) -------------------------------------------------
+// Per-particle colored splats (Particle Life species palette, Boids heading
+// hue). Three interleaved fixed-point channels per pixel — buffer layout is
+// uint × (width*height*3), index pixel*3 + {0,1,2} — accumulated with the
+// same scale-256 atomic_uint scheme as the density splat above (integer adds
+// are order-independent → deterministic). Shared by every RGB-splatting
+// module, which is why these live here and not in a module .metal.
+
+struct SplatResolveRGBParams {
+    uint width;
+    uint height;
+    float gain;
+};
+
+// Accumulate one particle's color into the RGB fixed-point buffer.
+// cellIdx = y * width + x (pixel index, NOT pre-multiplied by 3).
+inline void splatAddRGB(device atomic_uint* rgb, uint cellIdx, float3 c) {
+    uint base = cellIdx * 3u;
+    atomic_fetch_add_explicit(&rgb[base + 0u], uint(max(c.x, 0.0f) * 256.0f),
+                              memory_order_relaxed);
+    atomic_fetch_add_explicit(&rgb[base + 1u], uint(max(c.y, 0.0f) * 256.0f),
+                              memory_order_relaxed);
+    atomic_fetch_add_explicit(&rgb[base + 2u], uint(max(c.z, 0.0f) * 256.0f),
+                              memory_order_relaxed);
+}
+
+// One-time clear (dispatch1D(width*height*3)); afterwards splatResolveRGB
+// zeroes each cell right after reading it, like splatResolve above.
+kernel void splatClearRGB(device atomic_uint* rgb [[buffer(0)]],
+                          constant SplatResolveRGBParams& p [[buffer(1)]],
+                          uint id [[thread_position_in_grid]]) {
+    if (id >= p.width * p.height * 3u) return;
+    atomic_store_explicit(&rgb[id], 0u, memory_order_relaxed);
+}
+
+kernel void splatResolveRGB(device atomic_uint* rgb [[buffer(0)]],
+                            texture2d<float, access::read_write> target [[texture(0)]],
+                            constant SplatResolveRGBParams& p [[buffer(1)]],
+                            uint2 gid [[thread_position_in_grid]]) {
+    if (gid.x >= p.width || gid.y >= p.height) return;
+
+    uint base = (gid.y * p.width + gid.x) * 3u;
+    float3 c =
+        float3(float(atomic_load_explicit(&rgb[base + 0u], memory_order_relaxed)),
+               float(atomic_load_explicit(&rgb[base + 1u], memory_order_relaxed)),
+               float(atomic_load_explicit(&rgb[base + 2u], memory_order_relaxed))) /
+        256.0f;
+
+    float4 cur = target.read(gid);
+    target.write(float4(cur.rgb + c * p.gain, cur.a), gid);
+
+    // Self-cell only → race-free reset, so no per-frame clear pass is needed.
+    atomic_store_explicit(&rgb[base + 0u], 0u, memory_order_relaxed);
+    atomic_store_explicit(&rgb[base + 1u], 0u, memory_order_relaxed);
+    atomic_store_explicit(&rgb[base + 2u], 0u, memory_order_relaxed);
+}

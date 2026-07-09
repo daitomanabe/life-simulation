@@ -1,0 +1,53 @@
+{
+  "seed": 3030,
+  "resolution": [
+    1280,
+    720
+  ],
+  "modules": [
+    {
+      "type": "Boids",
+      "name": "boids0",
+      "enabled": true,
+      "params": {
+        "particleCount": 100000,
+        "radius": 14,
+        "sepWeight": 60,
+        "aliWeight": 25,
+        "cohWeight": 18,
+        "minSpeed": 40,
+        "maxSpeed": 140,
+        "jitter": 0,
+        "splatGain": 1.0,
+        "blend": "add",
+        "opacity": 1.0
+      }
+    }
+  ],
+  "audioMappings": [
+    {
+      "source": "kick",
+      "target": "boids0.sepBoost",
+      "scale": 1.5,
+      "smoothing": 0.06
+    },
+    {
+      "source": "perc",
+      "target": "boids0.impulse",
+      "scale": 1.0,
+      "smoothing": 0.03
+    },
+    {
+      "source": "snare.trigger",
+      "target": "boids0.scatterPulse",
+      "scale": 1.0,
+      "smoothing": 0.0
+    },
+    {
+      "source": "hihat",
+      "target": "boids0.jitter",
+      "scale": 25,
+      "smoothing": 0.05
+    }
+  ]
+}

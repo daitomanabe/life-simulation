@@ -1,0 +1,47 @@
+{
+  "seed": 5150,
+  "resolution": [
+    1280,
+    720
+  ],
+  "modules": [
+    {
+      "type": "ParticleLife",
+      "name": "pl0",
+      "enabled": true,
+      "params": {
+        "particleCount": 100000,
+        "species": 6,
+        "rMax": 24,
+        "beta": 0.3,
+        "forceScale": 60,
+        "friction": 4,
+        "maxSpeed": 160,
+        "jitter": 0,
+        "splatGain": 1.0,
+        "blend": "add",
+        "opacity": 1.0
+      }
+    }
+  ],
+  "audioMappings": [
+    {
+      "source": "kick",
+      "target": "pl0.forceBoost",
+      "scale": 1.2,
+      "smoothing": 0.08
+    },
+    {
+      "source": "snare.trigger",
+      "target": "pl0.shufflePulse",
+      "scale": 1.0,
+      "smoothing": 0.0
+    },
+    {
+      "source": "hihat",
+      "target": "pl0.jitter",
+      "scale": 30,
+      "smoothing": 0.05
+    }
+  ]
+}

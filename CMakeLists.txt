@@ -47,6 +47,8 @@ add_library(lifecore STATIC
   LifeCore/Render/ColorMapPass.cpp
   LifeCore/Render/CompositePass.cpp
   LifeCore/Particle/ParticleSplatPass.cpp
+  # Spatial
+  LifeCore/Spatial/SpatialHashGrid.cpp
   # IO
   LifeCore/IO/ImageWriter.mm
   LifeCore/IO/FrameRecorder.cpp
@@ -57,6 +59,8 @@ add_library(lifecore STATIC
   Modules/FieldModules/CellularAutomata.cpp
   Modules/FieldModules/AudioToField.cpp
   Modules/ParticleModules/SlimeMold.cpp
+  Modules/ParticleModules/ParticleLife.cpp
+  Modules/ParticleModules/Boids.cpp
   Modules/RegisterModules.cpp
 )
 
