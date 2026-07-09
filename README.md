@@ -19,7 +19,7 @@ snare → kernel/topology、hihat → micro noise、fft → force field）。
 | 5 | Field×Particle Coupling (connections 実働 / Scene D) | ✅ 完了 |
 | 6 | 出力抽象化 (OutputSink / Window Preview / Syphon) | ✅ 完了 |
 | 7 | LifePresetLab (sweep 探索 + ギャラリー) | ✅ 完了 |
-| 8 | Fluid (Stable Fluids) + flowField 結合 | 実装中 |
+| 8 | Fluid (Stable Fluids) + flowField 結合 | ✅ 完了 |
 
 開発体制: 設計・レビュー・検証 = Fable、実装 = Sonnet サブエージェント。
 各フェーズの実装仕様書は `docs/specs/phaseN_*.md`。
@@ -201,12 +201,18 @@ Apps/     LifeRealtime  LifeOfflineRender  LifeBench (すべて薄い runner)
 - **CellularAutomata**: rule 0=Life, 1=Brian's Brain, 2=Seeds, 3=Cyclic。
   `injectAmount` (hihat 推奨) でセル注入。
 - **AudioToField**: fft[128] → R16F field。mode 0=スクロール spectrogram /
-  1=radial アナライザ (decay trail)。Phase 5 で他モジュールのルール変調に接続予定。
+  1=radial アナライザ (decay trail)。connections で他モジュールへ。
+- **Fluid**: Stam の Stable Fluids (toroidal / vorticity confinement /
+  Jacobi 28 回 warm start)。音が力場を駆動: kick→インパルス噴流 +
+  染料注入 (dyeInject)、hihat→乱流、fft low/mid/high→浮力/シア/攪拌。
+  `fluid0.velocity → boids0.flowField` で群れが流れに乗る
+  (Presets/fluid_boids.json)。720p 2.0-2.6ms/frame。
+  ⚠ 染料注入 (dyeInject) と速度インパルス (impulse) は別スケール —
+  共有すると注入半径が毎フレーム塗り潰しになる。
 
-## 次のステップ (第2世代)
+## 次のステップ
 
 1. Lenia FFT convolution (MPSGraph FFT / vDSP)、multi-kernel、organism preset
-2. 出力抽象化: Syphon / NDI (LifeRealtime の出力先として)
-3. LifePresetLab (parameter sweep / seed sweep / thumbnail 生成の自動化)
-4. 結合ポートの拡張 (Boids flow field、Lenia growth map、CA mask 等)
-5. Fluid (Stable Fluids) → MPM/SPH/PBD は基盤第2世代で (設計指示書 §20-21)
+2. NDI 出力 (OutputSink 実装を1つ足すだけ)、動画書き出し (AVAssetWriter)
+3. 結合ポートの拡張 (Lenia growth map、CA mask、Slime→Fluid 力源 等)
+4. MPM / SPH / PBD (設計指示書 §20-21 の第2世代枠)
