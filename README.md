@@ -15,8 +15,8 @@ snare → kernel/topology、hihat → micro noise、fft → force field）。
 | 1 | Core 基盤 + Reaction Diffusion + 3 アプリ | ✅ 完了 |
 | 2 | Field 系完成 (Lenia / Cellular Automata / AudioToField) | ✅ 完了 |
 | 3 | Particle 系 (ParticleSet2D / ParticleSplat / Slime Mold) | ✅ 完了 |
-| 4 | Spatial Hash (Particle Life / Boids) | 実装中 |
-| 5 | Field×Particle Coupling | 仕様済み ([docs/specs/](docs/specs/)) |
+| 4 | Spatial Hash (Particle Life / Boids) | ✅ 完了 |
+| 5 | Field×Particle Coupling (connections 実働 / Scene D) | ✅ 完了 |
 
 開発体制: 設計・レビュー・検証 = Fable、実装 = Sonnet サブエージェント。
 各フェーズの実装仕様書は `docs/specs/phaseN_*.md`。
@@ -26,8 +26,13 @@ snare → kernel/topology、hihat → micro noise、fft → force field）。
 - Scene A (Lenia R13 + RD×8steps + CA + AudioToField + 4層 composite) 1080p:
   **7.75 ms/frame** (~129 fps 容量、支配項は Lenia direct convolution)
 - Slime Mold 1M agents 1080p: **0.30 ms/frame** (~3400 fps 容量)
-- 決定性: 同一 seed → 同一出力 (PNG MD5 一致を確認済み、Slime は
-  整数 atomic 蓄積により粒子系でもバイト一致)
+- Particle Life (spatial hash 込み) 1080p: 100k@720p **2.33 ms** /
+  500k rMax16 **9.9 ms** / 1M rMax12 **24.5 ms**（grid 構築コストは
+  0.3ms 未満 — 力計算が支配、O(n²) を回避できている）
+- Scene D (Lenia→Slime→RD→ParticleLife 結合 + 5 モジュール合成) 720p:
+  **4.8 ms/frame** (207 fps 容量) / 1080p **9.4 ms** (106 fps)
+- 決定性: 同一 seed → 同一出力 (PNG MD5 一致を確認済み)。粒子系も
+  整数 atomic 蓄積 + per-cell ソートによる正準近傍順でバイト一致
 
 ## ビルド
 
@@ -105,7 +110,15 @@ pass 別 GPU 時間 (MTLCounterSampleBuffer, encoder 境界)、readback コス�
   `param(ctx, "feed", default)` で音変調済みの値だけを見る（OSC を知らない）
 
 同梱プリセット: `default.json` (RD), `lenia_basic.json`, `ca_basic.json`,
-`audio_field.json`, `field_basic.json` (Scene A: 4 モジュール合成)。
+`audio_field.json`, `field_basic.json` (Scene A: 4 モジュール合成),
+`slime_basic.json` (Scene B), `particle_life_basic.json` (Scene C),
+`boids_basic.json`, `coupled_life_basic.json` (Scene D: 結合生命系)。
+
+`connections` でモジュール間結合を宣言できる（Phase 5）:
+`{ "from": "lenia0.field", "to": "slime0.attractorField" }` —
+ポートは毎フレーム再解決されるので ping-pong フィールドも安全。
+現在のポート: 出力 `*.field` / `*.trail` / `*.output`、入力
+`slime.attractorField` / `rd.feedMap` / `pl.forceField`。
 
 ## アーキテクチャ
 
@@ -131,7 +144,10 @@ LifeCore/
   Sim/     SimulationModule(interface) ModuleFactory SceneRunner SharedTypes
   Math/    Random(SplitMix64/PCG, GPU と同一ハッシュ)
 Modules/
-  FieldModules/  ReactionDiffusion  Lenia  CellularAutomata  AudioToField
+  FieldModules/     ReactionDiffusion  Lenia  CellularAutomata  AudioToField
+  ParticleModules/  SlimeMold  ParticleLife  Boids
+LifeCore/Spatial/   SpatialHashGrid (決定的 GPU counting sort + per-cell sort)
+LifeCore/Particle/  ParticleSet2D (SoA)  ParticleSplatPass
 Shaders/  (実行時に Common/ → 各モジュールの順で連結し 1 ライブラリにコンパイル)
 Apps/     LifeRealtime  LifeOfflineRender  LifeBench (すべて薄い runner)
 ```
@@ -162,11 +178,10 @@ Apps/     LifeRealtime  LifeOfflineRender  LifeBench (すべて薄い runner)
 - **AudioToField**: fft[128] → R16F field。mode 0=スクロール spectrogram /
   1=radial アナライザ (decay trail)。Phase 5 で他モジュールのルール変調に接続予定。
 
-## 次のステップ (設計指示書 §19)
+## 次のステップ (第2世代)
 
-1. **Phase 3**: ParticleSet2D (SoA buffers) + ParticleSplat + TrailDeposit +
-   FieldSampler → Slime Mold (100k agents)
-2. **Phase 4**: SpatialHashGrid (cell sort + range) → Particle Life / Boids
-3. **Phase 5**: FieldToForce / connections 実装 → Scene D「Coupled Life」
-4. Lenia FFT convolution (MPSGraph FFT / vDSP)、multi-kernel、organism preset
-5. 出力抽象化: Syphon / NDI (LifeRealtime の出力先として)
+1. Lenia FFT convolution (MPSGraph FFT / vDSP)、multi-kernel、organism preset
+2. 出力抽象化: Syphon / NDI (LifeRealtime の出力先として)
+3. LifePresetLab (parameter sweep / seed sweep / thumbnail 生成の自動化)
+4. 結合ポートの拡張 (Boids flow field、Lenia growth map、CA mask 等)
+5. Fluid (Stable Fluids) → MPM/SPH/PBD は基盤第2世代で (設計指示書 §20-21)
