@@ -126,3 +126,107 @@ kernel void leniaStep(texture2d<float, access::read> src [[texture(0)]],
 
     dst.write(float4(clamp(A2, 0.0f, 1.0f), 0.0f, 0.0f, 0.0f), gid);
 }
+
+// ---- phase9 (docs/specs/phase9_lenia_fft.md §3-4): FFT-convolution growth
+// pass. leniaInit/leniaStep above are UNCHANGED (backward-compat contract);
+// this is a wholly new kernel used only when convMode="fft". It reads up to
+// 4 precomputed potentials (one FFT convolution per kernel, done in
+// Modules/FieldModules/Lenia.cpp before this pass) and folds them into a
+// single growth update. Mirrors life::LeniaModule::LeniaMultiParams
+// (this exact order) — deliberately separate from LeniaParams above.
+
+struct LeniaMultiParams {
+    float dt;
+    float kMu[4];
+    float kSigma[4];
+    float kWeight[4];
+    uint numKernels;
+    uint growthMode; // 0 standard (2·bell−1 weighted sum), 1 asymptotic (weighted bell average − A)
+    float noiseAmount;
+    float muJitter;
+    float injectAmount;
+    uint injectCount;
+    uint radius;
+    uint seed;
+    uint width;
+    uint height;
+    uint frameIndex;
+};
+
+static inline float leniaBell(float u, float mu, float sigma) {
+    float t = (u - mu) / sigma;
+    return exp(-0.5f * t * t);
+}
+
+kernel void leniaGrowthMulti(texture2d<float, access::read> src [[texture(0)]],
+                             texture2d<float, access::write> dst [[texture(1)]],
+                             texture2d<float, access::read> potential0 [[texture(2)]],
+                             texture2d<float, access::read> potential1 [[texture(3)]],
+                             texture2d<float, access::read> potential2 [[texture(4)]],
+                             texture2d<float, access::read> potential3 [[texture(5)]],
+                             constant LeniaMultiParams& p [[buffer(0)]],
+                             constant AudioUniforms& audio [[buffer(1)]],
+                             uint2 gid [[thread_position_in_grid]]) {
+    if (gid.x >= p.width || gid.y >= p.height) return;
+
+    float A = src.read(gid).x;
+
+    // muJitter shifts every kernel's growth center by the same per-pixel
+    // amount (topology break) — copied from leniaStep's formula verbatim.
+    float muJ = 0.0f;
+    if (p.muJitter > 0.0f) {
+        float j = rand01(gid, 401u + audio.frameIndex % 613u, p.seed) - 0.5f;
+        muJ = j * p.muJitter * 0.05f;
+    }
+
+    float bell[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    if (p.numKernels > 0u) bell[0] = leniaBell(potential0.read(gid).x, p.kMu[0] + muJ, p.kSigma[0]);
+    if (p.numKernels > 1u) bell[1] = leniaBell(potential1.read(gid).x, p.kMu[1] + muJ, p.kSigma[1]);
+    if (p.numKernels > 2u) bell[2] = leniaBell(potential2.read(gid).x, p.kMu[2] + muJ, p.kSigma[2]);
+    if (p.numKernels > 3u) bell[3] = leniaBell(potential3.read(gid).x, p.kMu[3] + muJ, p.kSigma[3]);
+
+    float sumWeighted = 0.0f; // Σ h_k · bell_k
+    float sumWeights = 0.0f;  // Σ h_k
+    float sumStd = 0.0f;      // Σ h_k · (2·bell_k − 1)
+    for (uint k = 0; k < p.numKernels && k < 4u; ++k) {
+        sumWeighted += p.kWeight[k] * bell[k];
+        sumWeights += p.kWeight[k];
+        sumStd += p.kWeight[k] * (2.0f * bell[k] - 1.0f);
+    }
+
+    float A2;
+    if (p.growthMode == 1u) {
+        float target = (sumWeights > 1e-6f) ? (sumWeighted / sumWeights) : A;
+        A2 = A + p.dt * (target - A);
+    } else {
+        A2 = A + p.dt * sumStd;
+    }
+
+    // noiseAmount / injectAmount blob injection — copied from leniaStep
+    // verbatim (direct-path behavior parity, §3-4 "既存の...ロジックを
+    // leniaStep からコピーして適用"; leniaStep itself is not touched so
+    // that its own md5 contract is untouched).
+    if (p.noiseAmount > 0.0f) {
+        float n = rand01(gid, 503u, p.seed) - 0.5f;
+        A2 += n * p.noiseAmount * 0.03f;
+    }
+
+    if (p.injectAmount > 0.0f) {
+        float2 uv = (float2(gid) + 0.5f) / float2(p.width, p.height);
+        float aspect = float(p.width) / float(p.height);
+        uint cycle = p.frameIndex / 12u;
+        float blobR = float(p.radius) * 0.9f / float(p.height);
+        for (uint i = 0; i < p.injectCount; ++i) {
+            float2 c = float2(rand01(uint2(i, cycle), 811u, p.seed),
+                              rand01(uint2(cycle, i), 823u, p.seed));
+            float2 d = uv - c;
+            d = d - round(d); // toroidal
+            d.x *= aspect;
+            float r2 = dot(d, d) / (blobR * blobR);
+            float bump = exp(-r2 * 0.5f);
+            A2 = mix(A2, 0.6f, clamp(bump * p.injectAmount, 0.0f, 1.0f));
+        }
+    }
+
+    dst.write(float4(clamp(A2, 0.0f, 1.0f), 0.0f, 0.0f, 0.0f), gid);
+}

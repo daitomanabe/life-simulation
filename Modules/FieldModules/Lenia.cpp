@@ -4,18 +4,193 @@
 #include "LifeCore/Math/Random.h"
 #include "LifeCore/Sim/SharedTypes.h"
 
+#include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <string>
+#include <utility>
 #include <vector>
 
 namespace life {
+
+namespace {
+
+// Mirrors FFTParams in Shaders/Common/FFT.metal exactly (phase9 §2).
+struct FFTParams {
+    uint32_t width, height, N, Ns;
+    int32_t dir;
+    uint32_t normalize;
+};
+static_assert(sizeof(FFTParams) == 6 * 4,
+              "FFTParams layout must stay scalar-packed to match FFT.metal");
+
+// FFTParams with only width/height set — enough for the bounds check inside
+// realToComplex/complexToReal/complexMulScale/clearR32F, which don't touch
+// N/Ns/dir/normalize.
+FFTParams fftBounds(uint32_t w, uint32_t h) {
+    FFTParams fp{};
+    fp.width = w;
+    fp.height = h;
+    return fp;
+}
+
+uint32_t log2u(uint32_t v) {
+    uint32_t r = 0;
+    while (v > 1u) {
+        v >>= 1;
+        ++r;
+    }
+    return r;
+}
+
+bool isPow2(uint32_t v) { return v != 0 && (v & (v - 1u)) == 0; }
+
+// Drives one full 2D FFT (all log2(simW) X-stages, then all log2(simH)
+// Y-stages — order between the two axes doesn't matter, they're
+// independent separable 1D transforms) over the pingA/pingB RG32F scratch
+// pair. pingA must already hold the input complex data on entry. Returns
+// whichever of pingA/pingB ends up holding the result (stage count parity
+// depends on simW/simH, so callers must not assume it's always pingA).
+// Phase9 spec §2: "C++ 側は encodeFFT2D(...) のようなヘルパーを Lenia.cpp
+// 内 static でよい".
+TextureHandle encodeFFT2D(CommandGraph& graph, const std::string& prefix, TextureHandle pingA,
+                          TextureHandle pingB, uint32_t simW, uint32_t simH, int dir) {
+    TextureHandle cur = pingA, nxt = pingB;
+    uint32_t stagesX = log2u(simW);
+    for (uint32_t s = 0; s < stagesX; ++s) {
+        FFTParams fp{simW, simH, simW, 1u << s, dir,
+                    uint32_t(dir < 0 && s + 1 == stagesX ? 1 : 0)};
+        graph.pass(prefix + ".x" + std::to_string(s))
+            .pipeline("fftStageX")
+            .read(0, cur)
+            .write(1, nxt)
+            .uniforms(0, fp)
+            .dispatch2D(simW / 2, simH);
+        std::swap(cur, nxt);
+    }
+    uint32_t stagesY = log2u(simH);
+    for (uint32_t s = 0; s < stagesY; ++s) {
+        FFTParams fp{simW, simH, simH, 1u << s, dir,
+                    uint32_t(dir < 0 && s + 1 == stagesY ? 1 : 0)};
+        graph.pass(prefix + ".y" + std::to_string(s))
+            .pipeline("fftStageY")
+            .read(0, cur)
+            .write(1, nxt)
+            .uniforms(0, fp)
+            .dispatch2D(simW, simH / 2);
+        std::swap(cur, nxt);
+    }
+    return cur;
+}
+
+// Generalized ring-kernel shape (phase9 §4, "既存 buildKernelTexture を
+// 一般化"): B = betas.size() concentric shells, u = (r/radiusK)*B,
+// K(r) = betas[floor(u)] * bell(u - floor(u), 0.5, kernelShellSigma*B),
+// zero outside r in (0, radiusK]. Written directly into a simW*simH image
+// with the kernel centered at index (0,0), toroidally wrapped ("fftshift"
+// layout) — the placement circular convolution via FFT multiplication
+// needs. Normalized so the image sums to 1, matching buildKernelTexture's
+// existing Σ=1 convention.
+void buildRingKernelImage(uint32_t simW, uint32_t simH, float radiusK, float kernelShellSigma,
+                          const std::vector<float>& betas, std::vector<float>& outImage) {
+    outImage.assign(size_t(simW) * simH, 0.0f);
+    if (betas.empty() || radiusK <= 0.0f) return;
+    const uint32_t B = uint32_t(betas.size());
+    const float Bf = float(B);
+
+    double sum = 0.0;
+    for (uint32_t y = 0; y < simH; ++y) {
+        int dy = int(y);
+        if (dy > int(simH / 2)) dy -= int(simH);
+        for (uint32_t x = 0; x < simW; ++x) {
+            int dx = int(x);
+            if (dx > int(simW / 2)) dx -= int(simW);
+            float r = std::sqrt(float(dx) * float(dx) + float(dy) * float(dy));
+            float w = 0.0f;
+            if (r > 0.0f && r <= radiusK) {
+                float u = (r / radiusK) * Bf;
+                uint32_t i = std::min<uint32_t>(uint32_t(u), B - 1);
+                float t = (u - float(i) - 0.5f) / (kernelShellSigma * Bf);
+                w = betas[i] * std::exp(-0.5f * t * t);
+            }
+            outImage[size_t(y) * simW + x] = w;
+            sum += w;
+        }
+    }
+    if (sum > 0.0) {
+        float inv = float(1.0 / sum);
+        for (auto& w : outImage) w *= inv;
+    }
+}
+
+} // namespace
 
 void LeniaModule::setup(SimulationContext& ctx) {
     width_ = ctx.width;
     height_ = ctx.height;
 
+    // ---- phase9 §1/§3/§4: convMode, sim-resolution split, kernels[] ----
+    std::string convModeStr = params_.value("convMode", std::string("direct"));
+    useFFT_ = (convModeStr == "fft");
+
+    uint32_t simW = params_.value("simWidth", 0u);
+    uint32_t simH = params_.value("simHeight", 0u);
+    simWidth_ = simW ? simW : width_;
+    simHeight_ = simH ? simH : height_;
+
+    bool hasKernelsParam = params_.contains("kernels") && params_["kernels"].is_array() &&
+                           !params_["kernels"].empty();
+    if (hasKernelsParam) {
+        for (const auto& kj : params_["kernels"]) {
+            if (kernels_.size() >= 4) {
+                fprintf(stderr,
+                       "[life] %s: \"kernels\" has more than 4 entries; truncating to 4\n",
+                       instanceName_.c_str());
+                break;
+            }
+            KernelDef kd;
+            kd.radiusScale = kj.value("radiusScale", 1.0f);
+            kd.mu = kj.value("mu", 0.15f);
+            kd.sigma = kj.value("sigma", 0.017f);
+            kd.weight = kj.value("weight", 1.0f);
+            kd.betas.clear();
+            if (kj.contains("betas") && kj["betas"].is_array()) {
+                for (const auto& b : kj["betas"]) kd.betas.push_back(b.get<float>());
+            }
+            if (kd.betas.empty()) kd.betas.push_back(1.0f);
+            kernels_.push_back(std::move(kd));
+        }
+    }
+
+    if (useFFT_ && (!isPow2(simWidth_) || !isPow2(simHeight_))) {
+        fprintf(stderr,
+               "[life] %s: convMode=\"fft\" requires simWidth/simHeight to be powers of "
+               "two (got %ux%u); falling back to convMode=\"direct\"\n",
+               instanceName_.c_str(), simWidth_, simHeight_);
+        useFFT_ = false;
+    }
+
+    // "kernels" without convMode=fft: setup error (spec §4) -> keep running in
+    // direct mode using only kernels[0] (its mu/sigma become the growthMu/
+    // growthSigma *fallback default*; an explicit scene growthMu/growthSigma
+    // still wins, see encode()). kernels_ itself is only ever consulted when
+    // useFFT_, so it is cleared below either way.
+    float radiusScaleOverride = 1.0f;
+    if (hasKernelsParam && !useFFT_) {
+        fprintf(stderr,
+               "[life] %s: \"kernels\" requires convMode=\"fft\"; continuing in direct "
+               "mode using kernels[0] only\n",
+               instanceName_.c_str());
+        const KernelDef& k0 = kernels_[0];
+        radiusScaleOverride = k0.radiusScale;
+        fallbackGrowthMu_ = k0.mu;
+        fallbackGrowthSigma_ = k0.sigma;
+    }
+    if (!useFFT_) kernels_.clear();
+
     Field2DDesc fd;
-    fd.width = width_;
-    fd.height = height_;
+    fd.width = simWidth_;
+    fd.height = simHeight_;
     fd.format = PixelFormat::R32F;
     fd.pingPong = true;
     fd.boundary = BoundaryMode::Wrap;
@@ -29,12 +204,12 @@ void LeniaModule::setup(SimulationContext& ctx) {
     od.label = instanceName_ + ".output";
     output_ = ctx.resources->createTexture(od);
 
-    gpuParams_.radius = params_.value("radius", 13u);
+    gpuParams_.radius = uint32_t(std::round(params_.value("radius", 13u) * radiusScaleOverride));
     gpuParams_.kernelSize = gpuParams_.radius * 2 + 1;
     gpuParams_.initCoverage = params_.value("initCoverage", 0.4f);
     gpuParams_.initScale = params_.value("initScale", 24.0f);
-    gpuParams_.width = width_;
-    gpuParams_.height = height_;
+    gpuParams_.width = simWidth_;
+    gpuParams_.height = simHeight_;
     kernelShellMu_ = params_.value("kernelShellMu", 0.5f);
     kernelShellSigma_ = params_.value("kernelShellSigma", 0.15f);
 
@@ -47,6 +222,42 @@ void LeniaModule::setup(SimulationContext& ctx) {
     colorMap_.configure(params_);
 
     buildKernelTexture(ctx);
+
+    if (useFFT_) {
+        TextureDesc cd;
+        cd.width = simWidth_;
+        cd.height = simHeight_;
+        cd.format = PixelFormat::RG32F;
+        cd.storage = StorageMode::GPUPrivate;
+        cd.label = instanceName_ + ".fftPingA";
+        fftPingA_ = ctx.resources->createTexture(cd);
+        cd.label = instanceName_ + ".fftPingB";
+        fftPingB_ = ctx.resources->createTexture(cd);
+        cd.label = instanceName_ + ".stateFFT";
+        stateFFTStable_ = ctx.resources->createTexture(cd);
+        for (uint32_t k = 0; k < 4; ++k) {
+            cd.label = instanceName_ + ".kernelFFT" + std::to_string(k);
+            kernelFFT_[k] = ctx.resources->createTexture(cd);
+        }
+
+        TextureDesc pd;
+        pd.width = simWidth_;
+        pd.height = simHeight_;
+        pd.format = PixelFormat::R32F;
+        pd.storage = StorageMode::GPUPrivate;
+        for (uint32_t k = 0; k < 4; ++k) {
+            pd.label = instanceName_ + ".potential" + std::to_string(k);
+            potential_[k] = ctx.resources->createTexture(pd);
+        }
+
+        TextureDesc ud;
+        ud.width = simWidth_;
+        ud.height = simHeight_;
+        ud.format = PixelFormat::R32F;
+        ud.storage = StorageMode::Shared; // CPU-uploaded kernel images (§3 needsInit)
+        ud.label = instanceName_ + ".kernelImageUpload";
+        kernelImageUpload_ = ctx.resources->createTexture(ud);
+    }
 }
 
 void LeniaModule::buildKernelTexture(SimulationContext& ctx) {
@@ -96,8 +307,8 @@ void LeniaModule::updateCPU(const AudioFeatureState& audio) { audio_ = audio; }
 
 void LeniaModule::encode(SimulationContext& ctx) {
     gpuParams_.dt = param(ctx, "dt", 0.1f);
-    gpuParams_.growthMu = param(ctx, "growthMu", 0.15f);
-    gpuParams_.growthSigma = param(ctx, "growthSigma", 0.017f);
+    gpuParams_.growthMu = param(ctx, "growthMu", fallbackGrowthMu_);
+    gpuParams_.growthSigma = param(ctx, "growthSigma", fallbackGrowthSigma_);
     gpuParams_.noiseAmount = param(ctx, "noiseAmount", 0.0f);
     gpuParams_.muJitter = param(ctx, "muJitter", 0.0f);
     gpuParams_.injectAmount = param(ctx, "injectAmount", 0.0f);
@@ -113,26 +324,164 @@ void LeniaModule::encode(SimulationContext& ctx) {
             .pipeline("leniaInit")
             .write(0, field_.read())
             .uniforms(0, gpuParams_)
-            .dispatch2D(width_, height_);
+            .dispatch2D(simWidth_, simHeight_);
+
+        if (useFFT_) {
+            // §3: precompute kernelFFT[k] once (GPU, needsInit only). No
+            // "kernels" param -> one implicit kernel from the module's own
+            // radius/growthMu/growthSigma (betas=[1], radiusScale=1) so
+            // convMode=fft alone (no "kernels") still behaves like a single
+            // radial-kernel Lenia, just convolved via FFT instead of direct.
+            std::vector<KernelDef> effective = kernels_;
+            if (effective.empty()) {
+                KernelDef kd;
+                kd.radiusScale = 1.0f;
+                kd.mu = gpuParams_.growthMu;
+                kd.sigma = gpuParams_.growthSigma;
+                kd.weight = 1.0f;
+                kd.betas = {1.0f};
+                effective.push_back(kd);
+            }
+            uint32_t numK = std::min<uint32_t>(4, uint32_t(effective.size()));
+            multiParams_.numKernels = numK;
+
+            std::vector<float> img;
+            FFTParams fb = fftBounds(simWidth_, simHeight_);
+            for (uint32_t k = 0; k < numK; ++k) {
+                float Rk = float(gpuParams_.radius) * effective[k].radiusScale;
+                buildRingKernelImage(simWidth_, simHeight_, Rk, kernelShellSigma_,
+                                     effective[k].betas, img);
+                ctx.resources->uploadTexture(kernelImageUpload_, img.data(),
+                                             size_t(simWidth_) * sizeof(float));
+
+                ctx.graph->pass(instanceName_ + ".kimg" + std::to_string(k))
+                    .pipeline("realToComplex")
+                    .read(0, kernelImageUpload_)
+                    .write(1, fftPingA_)
+                    .uniforms(0, fb)
+                    .dispatch2D(simWidth_, simHeight_);
+
+                TextureHandle kfwd =
+                    encodeFFT2D(*ctx.graph, instanceName_ + ".kfwd" + std::to_string(k),
+                               fftPingA_, fftPingB_, simWidth_, simHeight_, +1);
+                ctx.graph->copyTexture(kfwd, kernelFFT_[k]);
+
+                multiParams_.kMu[k] = effective[k].mu;
+                multiParams_.kSigma[k] = effective[k].sigma;
+                multiParams_.kWeight[k] = effective[k].weight;
+            }
+            for (uint32_t k = numK; k < 4; ++k) {
+                multiParams_.kMu[k] = 0.15f;
+                multiParams_.kSigma[k] = 0.017f;
+                multiParams_.kWeight[k] = 0.0f;
+            }
+
+            // Unused potential slots (k >= numK) must never contain
+            // uninitialized GPU memory (kWeight=0 only zeroes their
+            // contribution if the bound value is finite) — clear all 4 once;
+            // slots < numK get fully overwritten every substep below anyway.
+            for (uint32_t k = 0; k < 4; ++k) {
+                ctx.graph->pass(instanceName_ + ".pclear" + std::to_string(k))
+                    .pipeline("clearR32F")
+                    .write(0, potential_[k])
+                    .uniforms(0, fb)
+                    .dispatch2D(simWidth_, simHeight_);
+            }
+        }
         needsInit_ = false;
     }
 
     uint32_t steps = std::max(1u, ctx.substeps);
     for (uint32_t s = 0; s < steps; ++s) {
         gpuParams_.seed = pcgHash(seed_ ^ (ctx.frameIndex * 197u + s));
-        ctx.graph->pass(instanceName_ + ".step")
-            .pipeline("leniaStep")
-            .read(0, field_.read())
-            .write(1, field_.write())
-            .read(2, kernel_)
-            .uniforms(0, gpuParams_)
-            .uniforms(1, au)
-            .dispatch2D(width_, height_);
-        field_.swap();
+
+        if (!useFFT_) {
+            ctx.graph->pass(instanceName_ + ".step")
+                .pipeline("leniaStep")
+                .read(0, field_.read())
+                .write(1, field_.write())
+                .read(2, kernel_)
+                .uniforms(0, gpuParams_)
+                .uniforms(1, au)
+                .dispatch2D(simWidth_, simHeight_);
+            field_.swap();
+        } else {
+            // §3 per-frame FFT convolution: realToComplex -> FFT2D forward
+            // (state) -> per kernel: complexMulScale -> FFT2D inverse ->
+            // complexToReal -> potential_k -> leniaGrowthMulti.
+            FFTParams fb = fftBounds(simWidth_, simHeight_);
+
+            ctx.graph->pass(instanceName_ + ".r2c" + std::to_string(s))
+                .pipeline("realToComplex")
+                .read(0, field_.read())
+                .write(1, fftPingA_)
+                .uniforms(0, fb)
+                .dispatch2D(simWidth_, simHeight_);
+
+            TextureHandle sfwd =
+                encodeFFT2D(*ctx.graph, instanceName_ + ".sfwd" + std::to_string(s), fftPingA_,
+                           fftPingB_, simWidth_, simHeight_, +1);
+            // stateFFTStable_ must survive the per-kernel loop below, which
+            // reuses fftPingA_/fftPingB_ as scratch — copy it out first.
+            ctx.graph->copyTexture(sfwd, stateFFTStable_);
+
+            for (uint32_t k = 0; k < multiParams_.numKernels; ++k) {
+                std::string kk = std::to_string(s) + "_" + std::to_string(k);
+                ctx.graph->pass(instanceName_ + ".cmul" + kk)
+                    .pipeline("complexMulScale")
+                    .read(0, stateFFTStable_)
+                    .read(1, kernelFFT_[k])
+                    .write(2, fftPingA_)
+                    // normalize=0: the inverse FFT2D below applies 1/(W*H)
+                    // via its own per-stage normalize flag (§2 comment).
+                    .uniforms(0, fb)
+                    .dispatch2D(simWidth_, simHeight_);
+
+                TextureHandle inv = encodeFFT2D(*ctx.graph, instanceName_ + ".inv" + kk,
+                                               fftPingA_, fftPingB_, simWidth_, simHeight_, -1);
+
+                ctx.graph->pass(instanceName_ + ".c2r" + kk)
+                    .pipeline("complexToReal")
+                    .read(0, inv)
+                    .write(1, potential_[k])
+                    .uniforms(0, fb)
+                    .dispatch2D(simWidth_, simHeight_);
+            }
+
+            multiParams_.dt = gpuParams_.dt;
+            multiParams_.growthMode = gpuParams_.growthMode;
+            multiParams_.noiseAmount = gpuParams_.noiseAmount;
+            multiParams_.muJitter = gpuParams_.muJitter;
+            multiParams_.injectAmount = gpuParams_.injectAmount;
+            multiParams_.injectCount = gpuParams_.injectCount;
+            multiParams_.radius = gpuParams_.radius;
+            multiParams_.seed = gpuParams_.seed;
+            multiParams_.width = simWidth_;
+            multiParams_.height = simHeight_;
+            multiParams_.frameIndex = gpuParams_.frameIndex;
+
+            ctx.graph->pass(instanceName_ + ".growth" + std::to_string(s))
+                .pipeline("leniaGrowthMulti")
+                .read(0, field_.read())
+                .write(1, field_.write())
+                .read(2, potential_[0])
+                .read(3, potential_[1])
+                .read(4, potential_[2])
+                .read(5, potential_[3])
+                .uniforms(0, multiParams_)
+                .uniforms(1, au)
+                .dispatch2D(simWidth_, simHeight_);
+            field_.swap();
+        }
     }
 
-    colorMap_.encode(*ctx.graph, instanceName_ + ".colorMap", field_.read(), output_,
-                     width_, height_);
+    if (simWidth_ == width_ && simHeight_ == height_) {
+        colorMap_.encode(*ctx.graph, instanceName_ + ".colorMap", field_.read(), output_,
+                         width_, height_);
+    } else {
+        colorMap_.encodeScaled(*ctx.graph, instanceName_ + ".colorMap", field_.read(), output_,
+                               simWidth_, simHeight_, width_, height_);
+    }
 }
 
 } // namespace life

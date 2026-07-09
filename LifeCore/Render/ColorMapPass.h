@@ -33,6 +33,20 @@ public:
     void encode(CommandGraph& graph, const std::string& label, TextureHandle field,
                 TextureHandle rgbaOut, uint32_t width, uint32_t height);
 
+    // Phase 9 (docs/specs/phase9_lenia_fft.md §1): same palette mapping as
+    // encode() above, but field and rgbaOut may differ in size (Lenia's
+    // simWidth/simHeight vs the scene's output resolution) — field is read
+    // with a normalized-coordinate bilinear sample instead of a same-size
+    // texel read. When srcW/srcH == dstW/dstH this samples exactly at texel
+    // centers, which is bit-identical to a direct read (spec §1), but
+    // encode()/colorMapField are kept as-is for callers that need them
+    // (existing modules, and Lenia's own default same-size path — kept on
+    // the original codepath deliberately, not switched to always call this,
+    // to keep the backward-compat contract's diff to zero for that path).
+    void encodeScaled(CommandGraph& graph, const std::string& label, TextureHandle field,
+                      TextureHandle rgbaOut, uint32_t srcWidth, uint32_t srcHeight,
+                      uint32_t dstWidth, uint32_t dstHeight);
+
     ColorMapParams params;
 };
 

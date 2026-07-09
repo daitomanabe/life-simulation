@@ -200,8 +200,3 @@ if(LIFE_WITH_SYPHON)
   add_executable(SyphonCheck Apps/SyphonCheck/main.mm)
   target_link_libraries(SyphonCheck PRIVATE syphon_vendor)
 endif()
-
-# TEMPORARY (phase9 FFT self-test, docs/specs/phase9_lenia_fft.md §6-3/§6-4):
-# removed again once the FFT numerics are verified — see final report.
-add_executable(TmpPhase9Test tools/tmp_phase9_fft_selftest.cpp)
-target_link_libraries(TmpPhase9Test PRIVATE appcommon)

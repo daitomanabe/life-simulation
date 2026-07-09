@@ -3,6 +3,16 @@
 
 namespace life {
 
+namespace {
+// Mirrors ColorMapScaledParams in Shaders/Render/ColorMap.metal. Only the
+// destination size is needed on the GPU side — the sampler already knows
+// the source texture's own dimensions (§1).
+struct ColorMapScaledParams {
+    uint32_t dstWidth;
+    uint32_t dstHeight;
+};
+} // namespace
+
 void ColorMapPass::configure(const nlohmann::json& moduleParams) {
     if (!moduleParams.contains("colorMap")) return;
     const auto& cm = moduleParams["colorMap"];
@@ -33,6 +43,21 @@ void ColorMapPass::encode(CommandGraph& graph, const std::string& label,
         .write(1, rgbaOut)
         .uniforms(0, params)
         .dispatch2D(width, height);
+}
+
+void ColorMapPass::encodeScaled(CommandGraph& graph, const std::string& label,
+                                TextureHandle field, TextureHandle rgbaOut, uint32_t srcWidth,
+                                uint32_t srcHeight, uint32_t dstWidth, uint32_t dstHeight) {
+    (void)srcWidth;  // unused on the GPU side (see ColorMapScaledParams comment above);
+    (void)srcHeight; // kept as parameters for caller clarity / future use.
+    ColorMapScaledParams sp{dstWidth, dstHeight};
+    graph.pass(label)
+        .pipeline("colorMapFieldScaled")
+        .read(0, field)
+        .write(1, rgbaOut)
+        .uniforms(0, params)
+        .uniforms(1, sp)
+        .dispatch2D(dstWidth, dstHeight);
 }
 
 } // namespace life
