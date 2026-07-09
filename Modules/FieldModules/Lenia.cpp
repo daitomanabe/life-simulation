@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <fstream>
 #include <string>
 #include <utility>
 #include <vector>
@@ -123,6 +124,85 @@ void buildRingKernelImage(uint32_t simW, uint32_t simH, float radiusK, float ker
     }
 }
 
+// ---- phase11 (docs/specs/phase11_organisms.md): organism JSON loading ----
+
+// Decoded Presets/organisms/*.json (produced by tools/import_lenia_organism.py
+// from the official Chakazul/Lenia catalogue — see that script's header for
+// the RLE decoder's exact provenance). betas/kn/gn are retained for
+// provenance/fidelity but are NOT fed into the simulation: our engine has
+// only ever had one kernel/growth family (the existing truncated-Gaussian
+// bump used by buildKernelTexture()/leniaStep), so "useOrganismParams"
+// deliberately only overrides the parametric quantities the spec names
+// (radius, growthMu, growthSigma, dt) — never the kernel shape itself.
+struct OrganismData {
+    float R = 13.0f;
+    float T = 10.0f;
+    float mu = 0.15f;
+    float sigma = 0.015f;
+    uint32_t width = 0;
+    uint32_t height = 0;
+    std::vector<float> cells; // row-major, width*height, values in [0,1]
+};
+
+// Loads + validates an organism JSON file (phase11 spec: "organism JSON の
+// ロード/検証（cells 行長の一致、値域 [0,1]）。失敗時は stderr エラー +
+// noise init にフォールバック"). Returns false + outError on any problem;
+// caller falls back to noise init and leaves organism params unmodified.
+bool loadOrganismJSON(const std::string& path, OrganismData& out, std::string& outError) {
+    std::ifstream f(path);
+    if (!f) {
+        outError = "cannot open organism file: " + path;
+        return false;
+    }
+    nlohmann::json j;
+    try {
+        f >> j;
+    } catch (const std::exception& e) {
+        outError = std::string("organism JSON parse error: ") + e.what();
+        return false;
+    }
+
+    if (!j.contains("cells") || !j["cells"].is_array() || j["cells"].empty()) {
+        outError = "organism JSON missing non-empty \"cells\" array";
+        return false;
+    }
+    const auto& cellsJ = j["cells"];
+    const size_t rows = cellsJ.size();
+    if (!cellsJ[0].is_array() || cellsJ[0].empty()) {
+        outError = "organism JSON \"cells\" rows must be non-empty arrays";
+        return false;
+    }
+    const size_t cols = cellsJ[0].size();
+
+    std::vector<float> cells;
+    cells.reserve(rows * cols);
+    for (size_t r = 0; r < rows; ++r) {
+        if (!cellsJ[r].is_array() || cellsJ[r].size() != cols) {
+            outError = "organism JSON \"cells\" row " + std::to_string(r) +
+                       " length mismatch (expected " + std::to_string(cols) + " columns)";
+            return false;
+        }
+        for (size_t c = 0; c < cols; ++c) {
+            float v = cellsJ[r][c].get<float>();
+            if (v < 0.0f || v > 1.0f) {
+                outError = "organism JSON cell value out of [0,1] at row " +
+                           std::to_string(r) + " col " + std::to_string(c);
+                return false;
+            }
+            cells.push_back(v);
+        }
+    }
+
+    out.R = j.value("R", 13.0f);
+    out.T = j.value("T", 10.0f);
+    out.mu = j.value("mu", 0.15f);
+    out.sigma = j.value("sigma", 0.015f);
+    out.width = uint32_t(cols);
+    out.height = uint32_t(rows);
+    out.cells = std::move(cells);
+    return true;
+}
+
 } // namespace
 
 void LeniaModule::setup(SimulationContext& ctx) {
@@ -188,6 +268,58 @@ void LeniaModule::setup(SimulationContext& ctx) {
     }
     if (!useFFT_) kernels_.clear();
 
+    // ---- phase11 §"Lenia モジュール拡張": organism JSON + stamp init ----
+    std::string initModeStr = params_.value("initMode", std::string("noise"));
+    bool wantStampInit = (initModeStr == "stamp");
+    std::string organismPath = params_.value("organism", std::string());
+    bool wantOrganismParams = params_.value("useOrganismParams", true);
+    stampCount_ = std::min<uint32_t>(32u, params_.value("stampCount", 6u));
+    stampRotate_ = params_.value("stampRotate", true);
+
+    // Gated on organismPath being set: useOrganismParams defaults to true
+    // library-wide, so without this guard every existing "kernels"-array
+    // preset (e.g. lenia_multikernel.json, which never mentions "organism"
+    // at all) would spuriously trip this "conflict" on its unrelated
+    // default value. There's nothing to actually conflict with unless the
+    // scene opted into organism features by setting "organism".
+    if (!organismPath.empty() && wantOrganismParams && hasKernelsParam) {
+        fprintf(stderr,
+               "[life] %s: \"useOrganismParams\" cannot be combined with \"kernels\"; "
+               "ignoring organism parameter overrides\n",
+               instanceName_.c_str());
+        wantOrganismParams = false;
+    }
+    if (wantStampInit && organismPath.empty()) {
+        fprintf(stderr,
+               "[life] %s: initMode=\"stamp\" requires an \"organism\" path; falling back "
+               "to noise init\n",
+               instanceName_.c_str());
+        wantStampInit = false;
+    }
+
+    uint32_t organismRadiusDefault = 13u;
+    OrganismData organism;
+    if (!organismPath.empty()) {
+        std::string loadErr;
+        if (loadOrganismJSON(organismPath, organism, loadErr)) {
+            organismLoaded_ = true;
+        } else {
+            fprintf(stderr,
+                   "[life] %s: failed to load organism \"%s\": %s; falling back to noise "
+                   "init\n",
+                   instanceName_.c_str(), organismPath.c_str(), loadErr.c_str());
+            wantStampInit = false; // no cells to stamp
+        }
+    }
+
+    if (organismLoaded_ && wantOrganismParams) {
+        organismRadiusDefault = uint32_t(std::round(organism.R));
+        fallbackGrowthMu_ = organism.mu;
+        fallbackGrowthSigma_ = organism.sigma;
+        if (organism.T > 1e-6f) fallbackDt_ = 1.0f / organism.T;
+    }
+    useStampInit_ = wantStampInit && organismLoaded_;
+
     Field2DDesc fd;
     fd.width = simWidth_;
     fd.height = simHeight_;
@@ -204,7 +336,8 @@ void LeniaModule::setup(SimulationContext& ctx) {
     od.label = instanceName_ + ".output";
     output_ = ctx.resources->createTexture(od);
 
-    gpuParams_.radius = uint32_t(std::round(params_.value("radius", 13u) * radiusScaleOverride));
+    gpuParams_.radius =
+        uint32_t(std::round(params_.value("radius", organismRadiusDefault) * radiusScaleOverride));
     gpuParams_.kernelSize = gpuParams_.radius * 2 + 1;
     gpuParams_.initCoverage = params_.value("initCoverage", 0.4f);
     gpuParams_.initScale = params_.value("initScale", 24.0f);
@@ -222,6 +355,20 @@ void LeniaModule::setup(SimulationContext& ctx) {
     colorMap_.configure(params_);
 
     buildKernelTexture(ctx);
+
+    if (organismLoaded_) {
+        orgWidth_ = organism.width;
+        orgHeight_ = organism.height;
+        TextureDesc gd;
+        gd.width = orgWidth_;
+        gd.height = orgHeight_;
+        gd.format = PixelFormat::R32F;
+        gd.storage = StorageMode::Shared; // CPU-uploaded, same pattern as kernel_ above
+        gd.label = instanceName_ + ".organismCells";
+        organismCells_ = ctx.resources->createTexture(gd);
+        ctx.resources->uploadTexture(organismCells_, organism.cells.data(),
+                                     size_t(orgWidth_) * sizeof(float));
+    }
 
     if (useFFT_) {
         TextureDesc cd;
@@ -306,7 +453,7 @@ void LeniaModule::reset(uint32_t seed) {
 void LeniaModule::updateCPU(const AudioFeatureState& audio) { audio_ = audio; }
 
 void LeniaModule::encode(SimulationContext& ctx) {
-    gpuParams_.dt = param(ctx, "dt", 0.1f);
+    gpuParams_.dt = param(ctx, "dt", fallbackDt_);
     gpuParams_.growthMu = param(ctx, "growthMu", fallbackGrowthMu_);
     gpuParams_.growthSigma = param(ctx, "growthSigma", fallbackGrowthSigma_);
     gpuParams_.noiseAmount = param(ctx, "noiseAmount", 0.0f);
@@ -320,11 +467,32 @@ void LeniaModule::encode(SimulationContext& ctx) {
 
     if (needsInit_) {
         gpuParams_.seed = seed_;
-        ctx.graph->pass(instanceName_ + ".init")
-            .pipeline("leniaInit")
-            .write(0, field_.read())
-            .uniforms(0, gpuParams_)
-            .dispatch2D(simWidth_, simHeight_);
+        // phase11: stamp a known organism's cells instead of noise when
+        // initMode="stamp" resolved to a successfully-loaded organism file
+        // (setup()); leniaInit itself is untouched either way (backward-
+        // compat contract, phase9 comment above).
+        if (useStampInit_) {
+            LeniaStampParams sp;
+            sp.width = simWidth_;
+            sp.height = simHeight_;
+            sp.orgWidth = orgWidth_;
+            sp.orgHeight = orgHeight_;
+            sp.stampCount = stampCount_;
+            sp.stampRotate = stampRotate_ ? 1u : 0u;
+            sp.seed = seed_;
+            ctx.graph->pass(instanceName_ + ".stampInit")
+                .pipeline("leniaStampInit")
+                .write(0, field_.read())
+                .read(1, organismCells_)
+                .uniforms(0, sp)
+                .dispatch2D(simWidth_, simHeight_);
+        } else {
+            ctx.graph->pass(instanceName_ + ".init")
+                .pipeline("leniaInit")
+                .write(0, field_.read())
+                .uniforms(0, gpuParams_)
+                .dispatch2D(simWidth_, simHeight_);
+        }
 
         if (useFFT_) {
             // §3: precompute kernelFFT[k] once (GPU, needsInit only). No

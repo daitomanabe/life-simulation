@@ -1,0 +1,68 @@
+{
+  "seed": 7777,
+  "resolution": [
+    1280,
+    720
+  ],
+  "modules": [
+    {
+      "type": "Lenia",
+      "name": "lenia0",
+      "enabled": true,
+      "params": {
+        "simWidth": 0,
+        "simHeight": 0,
+        "convMode": "direct",
+        "initMode": "stamp",
+        "organism": "Presets/organisms/orbium.json",
+        "stampCount": 8,
+        "stampRotate": true,
+        "useOrganismParams": true,
+        "growthMode": 0,
+        "injectAmount": 0.0,
+        "noiseAmount": 0.0,
+        "blend": "add",
+        "opacity": 1.0,
+        "colorMap": {
+          "a": [
+            0.5,
+            0.5,
+            0.5
+          ],
+          "b": [
+            0.5,
+            0.5,
+            0.5
+          ],
+          "c": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "d": [
+            0.6,
+            0.42,
+            0.3
+          ],
+          "channel": 0,
+          "inputScale": 1.0,
+          "exposure": 1.0
+        }
+      }
+    }
+  ],
+  "audioMappings": [
+    {
+      "source": "hihat",
+      "target": "lenia0.noiseAmount",
+      "scale": 0.15,
+      "smoothing": 0.05
+    },
+    {
+      "source": "kick",
+      "target": "lenia0.injectAmount",
+      "scale": 0.25,
+      "smoothing": 0.08
+    }
+  ]
+}

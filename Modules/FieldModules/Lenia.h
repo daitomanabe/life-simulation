@@ -15,10 +15,25 @@
 // unchanged (backward-compat contract: lenia_basic.json's rendered output
 // must not move at all).
 //
+// Phase 11 (docs/specs/phase11_organisms.md) adds an "organism stamp init"
+// path: initMode "stamp" places a known Lenia creature's cells (imported
+// from the official Chakazul/Lenia catalogue via
+// tools/import_lenia_organism.py, see Presets/organisms/*.json) into the
+// field at up to 32 random positions/orientations via a new leniaStampInit
+// kernel, instead of leniaInit's noise soup. leniaInit/leniaStep are again
+// untouched (same backward-compat contract). useOrganismParams additionally
+// lets the organism file's own R/mu/sigma/T (dt=1/T) parameters become this
+// module's radius/growthMu/growthSigma/dt *defaults* (an explicit scene
+// param still wins) — mirrors the phase9 kernels[0]-fallback pattern below.
+//
 // Scene params: radius (px), dt, growthMu, growthSigma, kernelShellMu,
 // kernelShellSigma, initCoverage, initScale, noiseAmount, muJitter,
 // colorMap{...}; phase9 adds simWidth, simHeight, convMode ("direct"|"fft"),
-// kernels (array of {radiusScale, mu, sigma, weight, betas[]}, max 4).
+// kernels (array of {radiusScale, mu, sigma, weight, betas[]}, max 4);
+// phase11 adds initMode ("noise"|"stamp"), organism (path to an organism
+// JSON, required when initMode="stamp"), stampCount (default 6, max 32),
+// stampRotate (bool, default true), useOrganismParams (bool, default true;
+// mutually exclusive with "kernels" — that's a setup error, see setup()).
 //
 // Audio mapping intent (§12.2): kick→growth rate, hihat→noise injection,
 // perc→local disturbance, fft→kernel/growth modulation (via mappings onto
@@ -113,6 +128,23 @@ private:
     static_assert(sizeof(LeniaMultiParams) == 24 * 4,
                  "LeniaMultiParams layout must stay scalar-packed to match MSL");
 
+    // Mirrors LeniaStampParams in Shaders/Field/Lenia.metal (this exact
+    // order) — leniaStampInit's parameters (phase11 §"Lenia モジュール拡張").
+    // Stamp positions/orientations are re-derived from `seed` inside the
+    // kernel (rand01(i, ...) hashing), so this struct only needs the sizes
+    // + counts, not per-stamp data.
+    struct LeniaStampParams {
+        uint32_t width = 0;
+        uint32_t height = 0;
+        uint32_t orgWidth = 0;
+        uint32_t orgHeight = 0;
+        uint32_t stampCount = 6;
+        uint32_t stampRotate = 1; // bool banned in uniform structs (§constraint 2)
+        uint32_t seed = 0;
+    };
+    static_assert(sizeof(LeniaStampParams) == 7 * 4,
+                 "LeniaStampParams layout must stay scalar-packed to match MSL");
+
     void buildKernelTexture(SimulationContext& ctx);
 
     Field2D field_;
@@ -148,6 +180,19 @@ private:
     TextureHandle kernelFFT_[4];         // RG32F, one per kernel slot (persistent)
     TextureHandle potential_[4];         // R32F, one per kernel slot (recomputed/frame)
     TextureHandle kernelImageUpload_;    // R32F Shared, CPU staging for kernel images
+
+    // ---- phase11: organism stamp init (docs/specs/phase11_organisms.md) ----
+    bool useStampInit_ = false;    // initMode == "stamp" AND organism loaded OK
+    bool organismLoaded_ = false;  // organism JSON loaded + validated (setup())
+    bool stampRotate_ = true;
+    uint32_t stampCount_ = 6;
+    uint32_t orgWidth_ = 0, orgHeight_ = 0;
+    TextureHandle organismCells_;  // R32F Shared, orgWidth_ x orgHeight_, uploaded once
+    // Organism-derived "dt" default (1/T) when useOrganismParams applies —
+    // same fallback-default pattern as fallbackGrowthMu_/fallbackGrowthSigma_
+    // above, just for a different param and trigger (organism file, not
+    // kernels[0]). An explicit scene "dt" still wins (see encode()).
+    float fallbackDt_ = 0.1f;
 };
 
 } // namespace life

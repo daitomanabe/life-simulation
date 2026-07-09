@@ -230,3 +230,74 @@ kernel void leniaGrowthMulti(texture2d<float, access::read> src [[texture(0)]],
 
     dst.write(float4(clamp(A2, 0.0f, 1.0f), 0.0f, 0.0f, 0.0f), gid);
 }
+
+// ---- phase11 (docs/specs/phase11_organisms.md): organism stamp init.
+// leniaStampInit places up to 32 copies ("stamps") of a known organism's
+// cell pattern (loaded from Presets/organisms/*.json, uploaded as an R32F
+// texture by Modules/FieldModules/Lenia.cpp) into the field at random
+// positions/orientations, instead of leniaInit's noise soup. leniaInit
+// itself is UNCHANGED above (backward-compat contract, phase9 comment).
+// Mirrors life::LeniaModule::LeniaStampParams (this exact order).
+
+struct LeniaStampParams {
+    uint width;
+    uint height;
+    uint orgWidth;
+    uint orgHeight;
+    uint stampCount;
+    uint stampRotate; // 0/1 (bool banned in uniform structs, §constraint 2)
+    uint seed;
+};
+
+// Maps a world-space offset `d` (a stamp center -> gid delta, already
+// toroidally unwrapped) to the corresponding integer-preserving offset in
+// the organism's own unrotated local frame, for one of 8 dihedral
+// (rotate 0/90/180/270 x flip-x) orientations. Every branch is an axis
+// swap/negation, so integer pixel offsets stay exact — nearest-sampling
+// (spec: "バイリニアでなく nearest でよい") needs no interpolation.
+static inline float2 leniaStampInverse(float2 d, uint variant) {
+    if ((variant & 4u) != 0u) d.x = -d.x;
+    uint rot = variant & 3u;
+    if (rot == 1u) d = float2(d.y, -d.x);
+    else if (rot == 2u) d = float2(-d.x, -d.y);
+    else if (rot == 3u) d = float2(-d.y, d.x);
+    return d;
+}
+
+kernel void leniaStampInit(texture2d<float, access::write> state [[texture(0)]],
+                           texture2d<float, access::read> organism [[texture(1)]],
+                           constant LeniaStampParams& p [[buffer(0)]],
+                           uint2 gid [[thread_position_in_grid]]) {
+    if (gid.x >= p.width || gid.y >= p.height) return;
+
+    float A = 0.0f;
+    float2 orgCenter = float2(p.orgWidth, p.orgHeight) * 0.5f;
+    uint count = min(p.stampCount, 32u);
+    for (uint i = 0; i < count; ++i) {
+        // Stamp i's position/orientation are pure hashes of (i, seed), so
+        // every pixel's loop iteration agrees on the same stamp centers
+        // without any extra buffer/pass (same trick leniaStep's
+        // injectAmount blobs already use for their per-cycle centers).
+        float2 c = float2(rand01(uint2(i, 0u), 907u, p.seed),
+                          rand01(uint2(0u, i), 911u, p.seed)) * float2(p.width, p.height);
+
+        uint variant = 0u;
+        if (p.stampRotate != 0u) {
+            variant = min(uint(rand01(uint2(i, 1u), 919u, p.seed) * 8.0f), 7u);
+        }
+
+        float2 d = float2(gid) + 0.5f - c;
+        d.x -= float(p.width) * round(d.x / float(p.width));   // toroidal
+        d.y -= float(p.height) * round(d.y / float(p.height));
+
+        float2 local = leniaStampInverse(d, variant) + orgCenter;
+        int lx = int(floor(local.x));
+        int ly = int(floor(local.y));
+        if (lx >= 0 && lx < int(p.orgWidth) && ly >= 0 && ly < int(p.orgHeight)) {
+            float v = organism.read(uint2(uint(lx), uint(ly))).x;
+            A = max(A, v);
+        }
+    }
+
+    state.write(float4(clamp(A, 0.0f, 1.0f), 0.0f, 0.0f, 0.0f), gid);
+}
