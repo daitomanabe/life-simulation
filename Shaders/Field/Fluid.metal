@@ -23,6 +23,7 @@ struct FluidParams {
     uint seed;
     uint frameIndex;
     float dyeInject; // dye replacement fraction at impulse center (velocity-independent)
+    float forceFieldGain; // Phase 12: gradient force from the bound forceField
 };
 
 // ---- fluidPresent's own tiny uniform (Phase 8 §1: dye -> output is a plain
@@ -81,6 +82,7 @@ kernel void fluidAdvectVel(texture2d<float, access::sample> velR [[texture(0)]],
 // (fluidAdvectVel) and pressure projection are what keep this bounded.
 kernel void fluidForces(texture2d<float, access::read> velR [[texture(0)]],
                         texture2d<float, access::write> velW [[texture(1)]],
+                        texture2d<float, access::sample> forceField [[texture(2)]],
                         constant FluidParams& p [[buffer(0)]],
                         uint2 gid [[thread_position_in_grid]]) {
     if (gid.x >= p.width || gid.y >= p.height) return;
@@ -131,6 +133,19 @@ kernel void fluidForces(texture2d<float, access::read> velR [[texture(0)]],
         // within a cycle window) so this still animates every frame.
         float a = rand01(gid, 5601u + p.frameIndex, p.seed) * 6.28318530718f;
         vel += float2(cos(a), sin(a)) * p.high * 40.0f;
+    }
+
+    // Phase 12: a bound scalar field (e.g. slime trail) stirs the fluid —
+    // its gradient pushes velocity from low to high concentration, so trail
+    // networks carve currents. Fallback texture is black => zero gradient.
+    if (p.forceFieldGain != 0.0f) {
+        float e = 2.0f;
+        float w = float(p.width), h = float(p.height);
+        float gx = sampleFieldWrap(forceField, pixelPos + float2(e, 0.0f), w, h)
+                 - sampleFieldWrap(forceField, pixelPos - float2(e, 0.0f), w, h);
+        float gy = sampleFieldWrap(forceField, pixelPos + float2(0.0f, e), w, h)
+                 - sampleFieldWrap(forceField, pixelPos - float2(0.0f, e), w, h);
+        vel += float2(gx, gy) * p.forceFieldGain;
     }
 
     velW.write(float4(vel, 0.0f, 0.0f), gid);

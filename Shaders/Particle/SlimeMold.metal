@@ -26,6 +26,7 @@ struct SlimeParams {
     uint width;
     uint height;
     float attractorWeight; // Phase 5: weight of attractorField in the sensor read
+    float flowWeight;      // Phase 12: how strongly flowField advects agents
 };
 
 // Advances a per-agent PCG stream held in thread-local state and returns the
@@ -111,6 +112,7 @@ kernel void slimeMove(device float2* positions [[buffer(0)]],
                       device atomic_uint* deposit [[buffer(3)]],
                       texture2d<float, access::sample> trail [[texture(0)]],
                       texture2d<float, access::sample> attractor [[texture(1)]],
+                      texture2d<float, access::sample> flow [[texture(2)]],
                       constant SlimeParams& p [[buffer(4)]],
                       constant AudioUniforms& audio [[buffer(5)]],
                       uint id [[thread_position_in_grid]]) {
@@ -175,7 +177,12 @@ kernel void slimeMove(device float2* positions [[buffer(0)]],
         heading = float2(cos(a), sin(a));
     }
 
-    pos += heading * p.moveSpeed * p.dt;
+    // Phase 12: external flow (e.g. fluid velocity) carries the agent;
+    // heading is untouched so trail-following continues while drifting.
+    float2 drift = (p.flowWeight != 0.0f)
+        ? sampleFieldWrap4(flow, pos, w, h).xy * p.flowWeight
+        : float2(0.0f, 0.0f);
+    pos += (heading * p.moveSpeed + drift) * p.dt;
     pos.x = fract(pos.x / w) * w;
     pos.y = fract(pos.y / h) * h;
 

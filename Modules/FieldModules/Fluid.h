@@ -39,6 +39,16 @@ public:
         if (port == "output") return outputTexture();
         return {};
     }
+    // forceField input (Phase 12): a scalar field (e.g. slime trail) whose
+    // gradient is added to the velocity field — matter in the coupled field
+    // literally stirs the fluid. Fallback = 4x4 black (zero gradient).
+    bool bindNamedInput(const std::string& port, TextureHandle h) override {
+        if (port == "forceField") {
+            forceFieldInput_ = h.valid() ? h : forceFieldFallback_;
+            return true;
+        }
+        return false;
+    }
 
 private:
     // Mirrors FluidParams in Shaders/Field/Fluid.metal (this exact order).
@@ -59,8 +69,9 @@ private:
         uint32_t seed = 0;
         uint32_t frameIndex = 0;
         float dyeInject = 0.02f; // dye replacement per frame at impulse center
+        float forceFieldGain = 0.0f; // Phase 12: gradient force from forceField input
     };
-    static_assert(sizeof(FluidParams) == 16 * 4,
+    static_assert(sizeof(FluidParams) == 17 * 4,
                   "FluidParams layout must stay scalar-packed to match MSL");
 
     Field2D velocity_;   // RG32F, ping-pong, wrap
@@ -74,6 +85,8 @@ private:
     bool needsInit_ = true;
     uint32_t width_ = 0;
     uint32_t height_ = 0;
+    TextureHandle forceFieldInput_;
+    TextureHandle forceFieldFallback_;
 };
 
 } // namespace life

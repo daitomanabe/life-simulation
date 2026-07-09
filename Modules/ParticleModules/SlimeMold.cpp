@@ -58,6 +58,20 @@ void SlimeMoldModule::setup(SimulationContext& ctx) {
                                  size_t(fbd.width) * bytesPerPixel(fbd.format));
     attractorInput_ = attractorFallback_;
 
+    // 4x4 black RG fallback for the flowField input port (Phase 12) — same
+    // rationale as attractorFallback_ above.
+    TextureDesc ffd;
+    ffd.width = 4;
+    ffd.height = 4;
+    ffd.format = PixelFormat::RG16F;
+    ffd.storage = StorageMode::Shared;
+    ffd.label = instanceName_ + ".flowFallback";
+    flowFallback_ = ctx.resources->createTexture(ffd);
+    std::vector<uint8_t> flowZeros(size_t(ffd.width) * ffd.height * bytesPerPixel(ffd.format), 0);
+    ctx.resources->uploadTexture(flowFallback_, flowZeros.data(),
+                                 size_t(ffd.width) * bytesPerPixel(ffd.format));
+    flowInput_ = flowFallback_;
+
     gpuParams_.agentCount = pd.capacity;
     gpuParams_.width = width_;
     gpuParams_.height = height_;
@@ -95,6 +109,7 @@ void SlimeMoldModule::encode(SimulationContext& ctx) {
     gpuParams_.diffuseRate = param(ctx, "diffuseRate", 0.35f);
     gpuParams_.spawnMode = uint32_t(param(ctx, "spawnMode", 0.0f) + 0.5f);
     gpuParams_.attractorWeight = param(ctx, "attractorWeight", 0.0f);
+    gpuParams_.flowWeight = param(ctx, "flowWeight", 0.0f);
     gpuParams_.frameIndex = ctx.frameIndex;
 
     AudioUniforms au = toAudioUniforms(audio_);
@@ -141,6 +156,7 @@ void SlimeMoldModule::encode(SimulationContext& ctx) {
             .buffer(3, deposit_)
             .read(0, trail_.read())
             .read(1, attractorInput_)
+            .read(2, flowInput_)
             .uniforms(4, gpuParams_)
             .uniforms(5, au)
             .dispatch1D(gpuParams_.agentCount);

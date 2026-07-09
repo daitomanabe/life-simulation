@@ -49,6 +49,14 @@ public:
             attractorInput_ = h.valid() ? h : attractorFallback_;
             return true;
         }
+        // flowField input (Phase 12): an RG velocity field (typically
+        // fluid0.velocity) that carries agents along in the move step —
+        // heading/sensing stay intact, so the slime behaves like a mold
+        // suspended in moving water rather than a steered swimmer.
+        if (port == "flowField") {
+            flowInput_ = h.valid() ? h : flowFallback_;
+            return true;
+        }
         return false;
     }
 
@@ -74,6 +82,7 @@ private:
         uint32_t width = 0;
         uint32_t height = 0;
         float attractorWeight = 0.0f; // Phase 5: weight of attractorField in the sensor read
+        float flowWeight = 0.0f;      // Phase 12: how strongly flowField advects agents
     };
 
     ParticleSet2D set_;
@@ -90,6 +99,8 @@ private:
     uint32_t height_ = 0;
     TextureHandle attractorInput_;
     TextureHandle attractorFallback_;
+    TextureHandle flowInput_;
+    TextureHandle flowFallback_;
 };
 
 } // namespace life

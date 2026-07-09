@@ -70,6 +70,20 @@ void FluidModule::setup(SimulationContext& ctx) {
 
     gpuParams_.width = width_;
     gpuParams_.height = height_;
+
+    // 4x4 black fallback for the forceField input port (Phase 12) — same
+    // rationale as the other modules' coupling fallbacks.
+    TextureDesc fbd;
+    fbd.width = 4;
+    fbd.height = 4;
+    fbd.format = PixelFormat::R16F;
+    fbd.storage = StorageMode::Shared;
+    fbd.label = instanceName_ + ".forceFieldFallback";
+    forceFieldFallback_ = ctx.resources->createTexture(fbd);
+    std::vector<uint8_t> zeros(size_t(fbd.width) * fbd.height * bytesPerPixel(fbd.format), 0);
+    ctx.resources->uploadTexture(forceFieldFallback_, zeros.data(),
+                                 size_t(fbd.width) * bytesPerPixel(fbd.format));
+    forceFieldInput_ = forceFieldFallback_;
 }
 
 void FluidModule::reset(uint32_t seed) {
@@ -89,6 +103,7 @@ void FluidModule::encode(SimulationContext& ctx) {
     gpuParams_.turbulence = param(ctx, "turbulence", 0.0f);
     gpuParams_.injectHue = param(ctx, "injectHue", 0.0f);
     gpuParams_.dyeInject = param(ctx, "dyeInject", 0.02f);
+    gpuParams_.forceFieldGain = param(ctx, "forceFieldGain", 0.0f);
     // low/mid/high are transcribed straight from AudioFeatureState (design
     // point: not scene-base-value params, so no ParameterBus indirection).
     gpuParams_.low = audio_.low;
@@ -140,6 +155,7 @@ void FluidModule::encode(SimulationContext& ctx) {
             .pipeline("fluidForces")
             .read(0, velocity_.read())
             .write(1, velocity_.write())
+            .read(2, forceFieldInput_)
             .uniforms(0, gpuParams_)
             .dispatch2D(width_, height_);
         velocity_.swap();
