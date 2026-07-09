@@ -11,16 +11,17 @@
       "enabled": true,
       "params": {
         "particleCount": 100000,
-        "radius": 14,
-        "sepWeight": 60,
-        "aliWeight": 25,
-        "cohWeight": 18,
-        "minSpeed": 40,
-        "maxSpeed": 140,
+        "radius": 18,
+        "sepWeight": 50,
+        "aliWeight": 35,
+        "cohWeight": 50,
+        "minSpeed": 60,
+        "maxSpeed": 170,
         "jitter": 0,
         "splatGain": 1.0,
         "blend": "add",
-        "opacity": 1.0
+        "opacity": 1.0,
+        "sepRadiusFrac": 0.35
       }
     }
   ],

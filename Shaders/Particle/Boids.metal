@@ -26,6 +26,7 @@ struct BoidsParams {
     float cellSize;
     uint cellsX;
     uint cellsY;
+    float sepRadiusFrac; // separation acts only within radius*this (<1)
 };
 
 // Forward declaration: defined in ParticleSplat.metal, which is concatenated
@@ -97,7 +98,11 @@ kernel void boidsStep(device const float2* posR [[buffer(0)]],
                 d -= world * round(d / world); // minimum image (toroidal)
                 float r = length(d);
                 if (r < 1e-5f || r >= p.radius) continue;
-                sep += -d / r * (1.0f - r / p.radius); // closer → stronger
+                // Separation only at short range — full-radius separation
+                // cancels cohesion and collapses flocking into a uniform
+                // aligned gas (observed in review).
+                float sepR = p.radius * p.sepRadiusFrac;
+                if (r < sepR) sep += -d / r * (1.0f - r / sepR);
                 aliSum += velR[j];
                 cohSum += pi + d; // neighbor position in i's minimum image
                 count++;

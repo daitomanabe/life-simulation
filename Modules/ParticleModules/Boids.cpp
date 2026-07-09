@@ -80,6 +80,7 @@ void BoidsModule::encode(SimulationContext& ctx) {
     gpuParams_.maxSpeed = param(ctx, "maxSpeed", 140.0f);
     gpuParams_.jitter = param(ctx, "jitter", 0.0f);
     gpuParams_.sepBoost = param(ctx, "sepBoost", 0.0f);
+    gpuParams_.sepRadiusFrac = param(ctx, "sepRadiusFrac", 0.35f);
     gpuParams_.impulse = param(ctx, "impulse", 0.0f);
     gpuParams_.scatterPulse = param(ctx, "scatterPulse", 0.0f);
     gpuParams_.frameIndex = ctx.frameIndex;

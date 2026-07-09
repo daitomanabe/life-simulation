@@ -48,8 +48,9 @@ private:
         float cellSize = 14.0f;
         uint32_t cellsX = 0;
         uint32_t cellsY = 0;
+        float sepRadiusFrac = 0.35f;
     };
-    static_assert(sizeof(BoidsParams) == 19 * 4,
+    static_assert(sizeof(BoidsParams) == 20 * 4,
                   "BoidsParams layout must stay scalar-packed to match MSL");
 
     ParticleSet2D set_;
