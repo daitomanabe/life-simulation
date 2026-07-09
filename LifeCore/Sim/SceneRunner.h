@@ -19,6 +19,7 @@
 #include "LifeCore/Metal/MetalContext.h"
 #include "LifeCore/Metal/PipelineCache.h"
 #include "LifeCore/Metal/ResourcePool.h"
+#include "LifeCore/Output/OutputSink.h"
 #include "LifeCore/Params/ParameterBus.h"
 #include "LifeCore/Params/Scene.h"
 #include "LifeCore/Render/CompositePass.h"
@@ -63,6 +64,18 @@ public:
     bool dumpPNG(const std::string& path, float exposure, std::string& outError);
     bool dumpEXR(const std::string& path, std::string& outError);
 
+    // Register a live output sink (window preview, Syphon, ...). Must be
+    // called after create() and before the app's run loop starts stepping.
+    // start() runs synchronously here; on failure the sink is discarded
+    // (with a stderr warning) rather than aborting the app (design doc §3.8
+    // phase 6 §2).
+    void addOutputSink(std::unique_ptr<OutputSink> sink);
+
+    // Pump every registered sink once, outside the frame (event pumps,
+    // window-close detection, ...). shouldQuit is left untouched unless a
+    // sink requests a graceful stop (e.g. the preview window was closed).
+    void pumpOutputs(bool& shouldQuit);
+
     MetalContext& metal() { return *metal_; }
     ResourcePool& resources() { return *resources_; }
     CommandGraph& graph() { return *graph_; }
@@ -104,6 +117,10 @@ private:
     TextureHandle renderTarget_;
     uint32_t frameIndex_ = 0;
     float simTime_ = 0.0f;
+
+    // Declared last so it is destroyed (and stop()'d) first — before metal_/
+    // resources_/graph_ above tear down the Metal objects sinks depend on.
+    std::vector<std::unique_ptr<OutputSink>> outputSinks_;
 };
 
 } // namespace life

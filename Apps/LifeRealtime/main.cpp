@@ -1,14 +1,21 @@
 // Apps/LifeRealtime/main.cpp
-// Headless VJ runner (design doc §4.2 / §16): OSC in, 60 fps pacing, status
-// line once per second, optional periodic frame dump and audio capture
-// recording. No UI, no window — output abstraction (Syphon/NDI) comes later.
+// Headless-by-default VJ runner (design doc §4.2 / §16): OSC in, 60 fps
+// pacing, status line once per second, optional periodic frame dump and
+// audio capture recording. Live output (--preview window, --syphon server)
+// is opt-in via OutputSink (phase 6, design doc §3.8) and adds zero
+// overhead to the default headless path when not requested.
 
 #include "Apps/Common/AppCommon.h"
 #include "LifeCore/Audio/AudioInput.h"
 #include "LifeCore/IO/CaptureReplay.h"
+#include "LifeCore/Output/WindowPreviewSink.h"
 #include "LifeCore/Params/Scene.h"
 #include "LifeCore/Sim/ModuleFactory.h"
 #include "LifeCore/Sim/SceneRunner.h"
+
+#if defined(LIFE_WITH_SYPHON)
+#include "LifeCore/Output/SyphonSink.h"
+#endif
 
 #include <CLI11/CLI11.hpp>
 
@@ -16,6 +23,7 @@
 #include <chrono>
 #include <csignal>
 #include <cstdio>
+#include <filesystem>
 #include <thread>
 
 using namespace life;
@@ -38,6 +46,9 @@ int main(int argc, char** argv) {
     uint32_t dumpEvery = 0; // 0 = never
     double duration = 0.0;  // 0 = run until SIGINT
     float exposure = 1.0f;
+    bool preview = false;
+    float previewScale = 0.5f;
+    std::string syphonName;
 
     app.add_option("--scene", scenePath, "Scene JSON path");
     app.add_option("--shaders", shaderRoot, "Shaders/ directory");
@@ -51,6 +62,11 @@ int main(int argc, char** argv) {
     app.add_option("--record", recordPath, "Record AudioFeatureState to .jsonl");
     app.add_option("--duration", duration, "Stop after N seconds (0 = until SIGINT)");
     app.add_option("--exposure", exposure, "Preview PNG exposure");
+    app.add_flag("--preview", preview, "Show a live preview window");
+    app.add_option("--preview-scale", previewScale,
+                   "Preview window content size relative to scene resolution (default 0.5)");
+    app.add_option("--syphon", syphonName,
+                   "Publish frames as a Syphon server with this name (empty = disabled)");
     CLI11_PARSE(app, argc, argv);
 
     modules::registerBuiltinModules();
@@ -72,6 +88,20 @@ int main(int argc, char** argv) {
     if (!runner) {
         fprintf(stderr, "[life] %s\n", err.c_str());
         return 1;
+    }
+
+    if (preview) {
+        std::string sceneName = std::filesystem::path(scenePath).stem().string();
+        runner->addOutputSink(std::make_unique<WindowPreviewSink>(sceneName, previewScale));
+    }
+    if (!syphonName.empty()) {
+#if defined(LIFE_WITH_SYPHON)
+        runner->addOutputSink(std::make_unique<SyphonSink>(syphonName));
+#else
+        fprintf(stderr,
+                "[life] --syphon '%s' requested but this build has LIFE_WITH_SYPHON=OFF\n",
+                syphonName.c_str());
+#endif
     }
 
     AudioInput audio;
@@ -158,6 +188,10 @@ int main(int argc, char** argv) {
         std::this_thread::sleep_until(nextFrame);
         // If we fell behind by more than a frame, resync rather than spiral.
         if (clock::now() > nextFrame + frameInterval) nextFrame = clock::now();
+
+        bool quitRequested = false;
+        runner->pumpOutputs(quitRequested);
+        if (quitRequested) break;
     }
 
     audio.stop();

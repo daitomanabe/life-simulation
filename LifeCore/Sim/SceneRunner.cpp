@@ -5,7 +5,12 @@
 
 namespace life {
 
-SceneRunner::~SceneRunner() = default;
+SceneRunner::~SceneRunner() {
+    // Stop sinks explicitly (they may hold Metal/AppKit/IPC resources tied
+    // to metal_/resources_) before the automatic member teardown below
+    // destroys those unique_ptrs in reverse declaration order.
+    for (auto& sink : outputSinks_) sink->stop();
+}
 
 std::unique_ptr<SceneRunner> SceneRunner::create(const SceneRunnerDesc& desc,
                                                  std::string& outError) {
@@ -156,12 +161,30 @@ void SceneRunner::step(const AudioFeatureState& audio, float dt, const StepOptio
     composite_.encode(*graph_, layers, renderTarget_, desc_.scene.width,
                       desc_.scene.height);
 
+    // sink-less path costs one empty-vector loop check (design doc phase 6:
+    // "sink なしの経路にコストゼロ").
+    for (auto& sink : outputSinks_) sink->publish(*graph_, renderTarget_);
+
     if (opts.readback) recorder_->encodeReadback(*graph_, renderTarget_);
     graph_->endFrame(opts.waitGPU);
     if (opts.readback && opts.waitGPU) recorder_->fetch();
 
     simTime_ += dt;
     frameIndex_++;
+}
+
+void SceneRunner::addOutputSink(std::unique_ptr<OutputSink> sink) {
+    std::string err;
+    if (!sink->start(*metal_, *resources_, desc_.scene.width, desc_.scene.height, err)) {
+        fprintf(stderr, "[life] output sink '%s' failed to start: %s\n", sink->name(),
+                err.c_str());
+        return;
+    }
+    outputSinks_.push_back(std::move(sink));
+}
+
+void SceneRunner::pumpOutputs(bool& shouldQuit) {
+    for (auto& sink : outputSinks_) sink->pump(shouldQuit);
 }
 
 bool SceneRunner::dumpPNG(const std::string& path, float exposure,
