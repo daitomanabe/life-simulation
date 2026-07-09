@@ -20,9 +20,10 @@ snare → kernel/topology、hihat → micro noise、fft → force field）。
 | 6 | 出力抽象化 (OutputSink / Window Preview / Syphon) | ✅ 完了 |
 | 7 | LifePresetLab (sweep 探索 + ギャラリー) | ✅ 完了 |
 | 8 | Fluid (Stable Fluids) + flowField 結合 | ✅ 完了 |
-| 9 | Lenia FFT 畳み込み + マルチカーネル | 実装中 |
+| 9 | Lenia FFT 畳み込み + マルチカーネル | ✅ 完了 |
 | 10 | 動画書き出し (AVAssetWriter, ProRes/HEVC/H264) | ✅ 完了 |
-| 11 | Lenia オーガニズムプリセット (公式データ移植) | 仕様済み |
+| 11 | Lenia オーガニズムプリセット (公式データ移植) | 実装中 |
+| 12 | Fluid⇄Slime 双方向結合 | ✅ 完了 |
 
 開発体制: 設計・レビュー・検証 = Fable、実装 = Sonnet サブエージェント。
 各フェーズの実装仕様書は `docs/specs/phaseN_*.md`。
@@ -37,6 +38,9 @@ snare → kernel/topology、hihat → micro noise、fft → force field）。
   0.3ms 未満 — 力計算が支配、O(n²) を回避できている）
 - Scene D (Lenia→Slime→RD→ParticleLife 結合 + 5 モジュール合成) 720p:
   **4.8 ms/frame** (207 fps 容量) / 1080p **9.4 ms** (106 fps)
+- Lenia FFT (Phase 9): direct 単一カーネル R=32 @720p **19.4 ms** に対し
+  **FFT 3カーネル R=24 @1024×512 = 1.13 ms**（17倍速 + カーネル3倍）。
+  数値一致検証済み (1 step 後のピクセル差ゼロ)
 - 決定性: 同一 seed → 同一出力 (PNG MD5 一致を確認済み)。粒子系も
   整数 atomic 蓄積 + per-cell ソートによる正準近傍順でバイト一致
 
@@ -215,6 +219,15 @@ Apps/     LifeRealtime  LifeOfflineRender  LifeBench (すべて薄い runner)
   (Presets/fluid_boids.json)。720p 2.0-2.6ms/frame。
   ⚠ 染料注入 (dyeInject) と速度インパルス (impulse) は別スケール —
   共有すると注入半径が毎フレーム塗り潰しになる。
+- **Lenia FFT/マルチカーネル (Phase 9)**: `convMode: "fft"` +
+  `simWidth/simHeight`（2 の冪、シーン解像度と独立）で半径非依存の畳み込み。
+  `kernels: [{radiusScale, mu, sigma, weight, betas[]}]`（最大4）で
+  多スケール組織が出る。direct 経路は完全不変（md5 一致保証）。
+- **結合ポート一覧**: 出力 `*.field / *.trail / *.dye / *.velocity /
+  *.output`、入力 `slime.attractorField / slime.flowField / rd.feedMap /
+  pl.forceField / boids.flowField / fluid.forceField`。
+  Fluid⇄Slime 双方向 (Presets/fluid_slime.json) は「スライムの縁が
+  自ら流れを作り、その流れに乗る」泡立つ生態系になる。
 
 ## 次のステップ
 
