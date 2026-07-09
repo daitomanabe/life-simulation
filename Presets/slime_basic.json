@@ -1,0 +1,61 @@
+{
+  "seed": 909,
+  "resolution": [
+    1280,
+    720
+  ],
+  "modules": [
+    {
+      "type": "SlimeMold",
+      "name": "slime0",
+      "enabled": true,
+      "params": {
+        "agentCount": 200000,
+        "moveSpeed": 55,
+        "sensorAngle": 0.6,
+        "sensorDistance": 9,
+        "turnSpeed": 10,
+        "depositAmount": 1.0,
+        "decayRate": 1.8,
+        "diffuseRate": 0.35,
+        "jitter": 0.4,
+        "spawnMode": 0,
+        "showAgents": 0,
+        "blend": "add",
+        "opacity": 1.0
+      }
+    }
+  ],
+  "audioMappings": [
+    {
+      "source": "kick",
+      "target": "slime0.depositAmount",
+      "scale": 1.2,
+      "smoothing": 0.08
+    },
+    {
+      "source": "snare.trigger",
+      "target": "slime0.sensorBoost",
+      "scale": 1.0,
+      "smoothing": 0.02
+    },
+    {
+      "source": "hihat",
+      "target": "slime0.jitter",
+      "scale": 2.5,
+      "smoothing": 0.05
+    },
+    {
+      "source": "perc",
+      "target": "slime0.turnImpulse",
+      "scale": 1.0,
+      "smoothing": 0.03
+    },
+    {
+      "source": "beat.trigger",
+      "target": "slime0.resetPulse",
+      "scale": 0.6,
+      "smoothing": 0.02
+    }
+  ]
+}

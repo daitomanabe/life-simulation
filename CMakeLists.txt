@@ -46,6 +46,7 @@ add_library(lifecore STATIC
   # Render
   LifeCore/Render/ColorMapPass.cpp
   LifeCore/Render/CompositePass.cpp
+  LifeCore/Particle/ParticleSplatPass.cpp
   # IO
   LifeCore/IO/ImageWriter.mm
   LifeCore/IO/FrameRecorder.cpp
@@ -55,6 +56,7 @@ add_library(lifecore STATIC
   Modules/FieldModules/Lenia.cpp
   Modules/FieldModules/CellularAutomata.cpp
   Modules/FieldModules/AudioToField.cpp
+  Modules/ParticleModules/SlimeMold.cpp
   Modules/RegisterModules.cpp
 )
 

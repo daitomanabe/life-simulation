@@ -7,6 +7,7 @@
 #include "Modules/FieldModules/CellularAutomata.h"
 #include "Modules/FieldModules/Lenia.h"
 #include "Modules/FieldModules/ReactionDiffusion.h"
+#include "Modules/ParticleModules/SlimeMold.h"
 
 namespace life::modules {
 
@@ -19,7 +20,7 @@ void registerBuiltinModules() {
                    [] { return std::make_unique<CellularAutomataModule>(); });
     f.registerType("AudioToField",
                    [] { return std::make_unique<AudioToFieldModule>(); });
-    // Phase 3: SlimeMold
+    f.registerType("SlimeMold", [] { return std::make_unique<SlimeMoldModule>(); });
     // Phase 4: ParticleLife, Boids
 }
 
