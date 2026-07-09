@@ -17,6 +17,9 @@ snare → kernel/topology、hihat → micro noise、fft → force field）。
 | 3 | Particle 系 (ParticleSet2D / ParticleSplat / Slime Mold) | ✅ 完了 |
 | 4 | Spatial Hash (Particle Life / Boids) | ✅ 完了 |
 | 5 | Field×Particle Coupling (connections 実働 / Scene D) | ✅ 完了 |
+| 6 | 出力抽象化 (OutputSink / Window Preview / Syphon) | ✅ 完了 |
+| 7 | LifePresetLab (sweep 探索 + ギャラリー) | 実装中 |
+| 8 | Fluid (Stable Fluids) + flowField 結合 | 仕様済み |
 
 開発体制: 設計・レビュー・検証 = Fable、実装 = Sonnet サブエージェント。
 各フェーズの実装仕様書は `docs/specs/phaseN_*.md`。
@@ -61,6 +64,12 @@ PNG は ImageIO (macOS 標準) で書くため追加依存なし。
 - 毎秒 status 行 (fps / GPU ms / pass 数 / OSC 流量 / 特徴量)
 - `--record` で AudioFeatureState を JSONL 記録 → オフラインで再現可能
 - テスト送信: `python3 tools/send_test_osc.py --port 9000 --bpm 128 --duration 30`
+- **ライブ出力 (Phase 6)**: `--preview` でウィンドウ表示
+  (`--preview-scale 0.5`)、`--syphon <名前>` で Syphon サーバとして公開
+  （Resolume / MadMapper / VDMX 等から受けられる。検証クライアント:
+  `./build/SyphonCheck <名前>`）。ヘッドレス既定は不変（sink 未使用時
+  オーバーヘッドゼロ）。Syphon は `external/Syphon` に vendor 済みで
+  実行時シェーダコンパイルにパッチ済み（CommandLineTools 環境対応）
 
 ### LifeOfflineRender — 作品出力用 決定的レンダラー
 
