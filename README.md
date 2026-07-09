@@ -20,6 +20,9 @@ snare → kernel/topology、hihat → micro noise、fft → force field）。
 | 6 | 出力抽象化 (OutputSink / Window Preview / Syphon) | ✅ 完了 |
 | 7 | LifePresetLab (sweep 探索 + ギャラリー) | ✅ 完了 |
 | 8 | Fluid (Stable Fluids) + flowField 結合 | ✅ 完了 |
+| 9 | Lenia FFT 畳み込み + マルチカーネル | 実装中 |
+| 10 | 動画書き出し (AVAssetWriter, ProRes/HEVC/H264) | ✅ 完了 |
+| 11 | Lenia オーガニズムプリセット (公式データ移植) | 仕様済み |
 
 開発体制: 設計・レビュー・検証 = Fable、実装 = Sonnet サブエージェント。
 各フェーズの実装仕様書は `docs/specs/phaseN_*.md`。
@@ -82,6 +85,9 @@ PNG は ImageIO (macOS 標準) で書くため追加依存なし。
 - 固定 dt / 固定 seed / `--audio` でライブ入力を再生 → **ライブの瞬間を高解像度で再現**
 - PNG (sRGB, `--exposure`) + EXR (linear half) + `metadata.json`
 - `--resume`: 既存フレームは書き出しスキップ（シムは回すので状態は正確）
+- **動画直接書き出し (Phase 10)**: `--movie out.mov --codec prores422`
+  (prores422 / prores4444 / h264 / hevc、`--quality 0..1`)。ffmpeg 不要で
+  ITU-R 709 タグ付き .mov を生成。`--format png` と併用可 / `--resume` とは排他
 
 ### LifeBench — GPU 性能測定
 
