@@ -181,6 +181,10 @@ target_link_libraries(LifeOfflineRender PRIVATE appcommon)
 add_executable(LifeBench Apps/LifeBench/main.cpp)
 target_link_libraries(LifeBench PRIVATE appcommon)
 
+# Phase 7 (docs/specs/phase7_presetlab.md): parameter/seed sweep runner.
+add_executable(LifePresetLab Apps/LifePresetLab/main.cpp)
+target_link_libraries(LifePresetLab PRIVATE appcommon)
+
 # SyphonCheck (phase 6 §6): standalone verification client, deliberately not
 # linked against lifecore/appcommon — it only exercises the vendored Syphon
 # client path from a separate process.

@@ -1,0 +1,8 @@
+{
+  "mode": "per-axis",
+  "seeds": [7777, 1234],
+  "axes": [
+    { "target": "lenia0.growthMu", "values": [0.13, 0.15, 0.17] },
+    { "target": "lenia0.growthSigma", "range": [0.014, 0.022], "steps": 3 }
+  ]
+}

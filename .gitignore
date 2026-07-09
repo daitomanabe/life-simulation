@@ -5,3 +5,5 @@ frames/
 benchmark.json
 .DS_Store
 *.zip
+lab/
+sweeps/tmp_*
