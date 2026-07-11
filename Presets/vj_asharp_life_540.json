@@ -1,0 +1,401 @@
+{
+  "_note": [
+    "セクションごとに *どの生命を見せるか* を切り替える。VJ 側の Composition が",
+    "phrase ごとにシーンを差し替えるのと同じ考え方。opacity は SceneRunner が",
+    "毎フレーム ParameterBus から引くので、musicMappings で切り替えられる。",
+    "",
+    "  0 establish  CellularAutomata   まばらな白い斑点。静かな立ち上がり",
+    "  1 peak       SlimeMold          網。曲の主役",
+    "  2 suspend    Lenia (orbium)     無音の中を漂う生命体。energy=0.0 の区間",
+    "  3 suspend    ParticleLife       クラスタと環",
+    "  4 suspend    SlimeMold          網が別の相で戻る (energy=0.62)",
+    "  5 hinge      CellularAutomata   斑点へ回帰",
+    "  6 coda       SlimeMold + ParticleLife   曲で唯一 energy=1.0",
+    "",
+    "section.n:<k> は *この曲の* セクション配置に依存する。他の曲では",
+    "section.is:<role> で書くか、その曲の割り当てを作ること。",
+    "",
+    "隠れている層もシミュレーションは回り続ける。再び現れたときには時間が",
+    "経っている — 生命なので、止めて再開するのは嘘になる。",
+    "",
+    "音ハメは明るさではなく細胞の振る舞いへ。トレイル側 (depositAmount /",
+    "decayRate / diffuseRate / splatGain / inputScale) は全て定数。",
+    "検証: python3 tests/motion_response.py <this> --music ... --capture ...",
+    "",
+    "lenia0 は見えない (opacity 0)。slime0 の誘引場としてだけ働く。"
+  ],
+  "seed": 20260710,
+  "resolution": [
+    960,
+    540
+  ],
+  "modules": [
+    {
+      "type": "Lenia",
+      "name": "lenia0",
+      "enabled": true,
+      "params": {
+        "simWidth": 256,
+        "simHeight": 144,
+        "radius": 7,
+        "dt": 0.18,
+        "growthMu": 0.15,
+        "growthSigma": 0.016,
+        "kernelShellMu": 0.5,
+        "kernelShellSigma": 0.15,
+        "initCoverage": 0.34,
+        "initScale": 7.0,
+        "noiseAmount": 0.0,
+        "muJitter": 0.0,
+        "injectAmount": 0.0,
+        "injectCount": 5,
+        "blend": "add",
+        "opacity": 0.0,
+        "colorMap": {
+          "palette": "mono",
+          "channel": 0,
+          "inputScale": 1.0
+        }
+      }
+    },
+    {
+      "type": "SlimeMold",
+      "name": "slime0",
+      "enabled": true,
+      "params": {
+        "agentCount": 130000,
+        "moveSpeed": 12,
+        "sensorAngle": 0.35,
+        "sensorDistance": 5,
+        "turnSpeed": 9,
+        "depositAmount": 0.1,
+        "decayRate": 5.2,
+        "diffuseRate": 0.1,
+        "jitter": 0.15,
+        "attractorWeight": 1.15,
+        "spawnMode": 0,
+        "showAgents": 0,
+        "blend": "add",
+        "opacity": 0.0,
+        "colorMap": {
+          "palette": "mono",
+          "channel": 0,
+          "inputScale": 0.75
+        }
+      }
+    },
+    {
+      "type": "Lenia",
+      "name": "lenia1",
+      "enabled": true,
+      "params": {
+        "simWidth": 384,
+        "simHeight": 216,
+        "radius": 15,
+        "dt": 0.2,
+        "growthMu": 0.15,
+        "growthSigma": 0.017,
+        "kernelShellMu": 0.5,
+        "kernelShellSigma": 0.15,
+        "initCoverage": 0.3,
+        "initScale": 18.0,
+        "noiseAmount": 0.0,
+        "muJitter": 0.0,
+        "injectAmount": 0.0,
+        "injectCount": 4,
+        "blend": "add",
+        "opacity": 0.0,
+        "colorMap": {
+          "palette": "mono",
+          "channel": 0,
+          "inputScale": 0.62
+        }
+      }
+    },
+    {
+      "type": "ParticleLife",
+      "name": "pl0",
+      "enabled": true,
+      "params": {
+        "particleCount": 140000,
+        "species": 6,
+        "rMax": 12,
+        "beta": 0.3,
+        "forceScale": 60,
+        "friction": 4,
+        "maxSpeed": 80,
+        "jitter": 0,
+        "splatGain": 1.0,
+        "blend": "add",
+        "opacity": 0.0,
+        "monoColor": true
+      }
+    },
+    {
+      "type": "CellularAutomata",
+      "name": "ca0",
+      "enabled": true,
+      "params": {
+        "rule": 1,
+        "cyclicStates": 12,
+        "initDensity": 0.18,
+        "stepsPerFrame": 1,
+        "injectAmount": 0.0,
+        "blend": "add",
+        "opacity": 0.0,
+        "colorMap": {
+          "palette": "mono",
+          "channel": 0,
+          "inputScale": 1.0
+        }
+      }
+    }
+  ],
+  "connections": [
+    {
+      "from": "lenia0.field",
+      "to": "slime0.attractorField",
+      "mode": "sample"
+    }
+  ],
+  "audioMappings": [
+    {
+      "_": "Slime — 新生と死",
+      "source": "beat.trigger",
+      "target": "slime0.resetPulse",
+      "scale": 0.7,
+      "smoothing": 0.02
+    },
+    {
+      "_": "Slime — 震え",
+      "source": "hihat",
+      "target": "slime0.jitter",
+      "scale": 1.6,
+      "smoothing": 0.05
+    },
+    {
+      "_": "Slime — 分岐角",
+      "source": "centroid",
+      "target": "slime0.sensorAngle",
+      "scale": 1.1,
+      "smoothing": 0.3
+    },
+    {
+      "_": "Slime — 成長速度",
+      "source": "rms",
+      "target": "slime0.moveSpeed",
+      "scale": 35.0,
+      "smoothing": 0.18
+    },
+    {
+      "_": "ParticleLife — 拍で種族が入れ替わる",
+      "source": "beat.trigger",
+      "target": "pl0.shufflePulse",
+      "scale": 0.5,
+      "smoothing": 0.02
+    },
+    {
+      "_": "ParticleLife — 力の強さ",
+      "source": "rms",
+      "target": "pl0.forceBoost",
+      "scale": 1.4,
+      "smoothing": 0.15
+    },
+    {
+      "_": "ParticleLife — 相互作用の形",
+      "source": "centroid",
+      "target": "pl0.beta",
+      "scale": 0.35,
+      "smoothing": 0.4
+    },
+    {
+      "_": "ParticleLife — 震え",
+      "source": "hihat",
+      "target": "pl0.jitter",
+      "scale": 22.0,
+      "smoothing": 0.05
+    },
+    {
+      "_": "CA — kick で細胞が生まれる",
+      "source": "kick.trigger",
+      "target": "ca0.injectAmount",
+      "scale": 0.35,
+      "smoothing": 0.02
+    },
+    {
+      "_": "orbium — kick で質量注入",
+      "source": "kick.trigger",
+      "target": "lenia1.injectAmount",
+      "scale": 0.25,
+      "smoothing": 0.02
+    }
+  ],
+  "musicMappings": [
+    {
+      "_": "— 見せる生命の切り替え（0.35 秒のディゾルブ）—",
+      "source": "section.n:0",
+      "target": "ca0.opacity",
+      "scale": 1.0,
+      "smoothing": 0.35
+    },
+    {
+      "source": "section.n:5",
+      "target": "ca0.opacity",
+      "scale": 1.0,
+      "smoothing": 0.35
+    },
+    {
+      "source": "section.n:1",
+      "target": "slime0.opacity",
+      "scale": 1.0,
+      "smoothing": 0.35
+    },
+    {
+      "source": "section.n:4",
+      "target": "slime0.opacity",
+      "scale": 1.0,
+      "smoothing": 0.35
+    },
+    {
+      "source": "section.n:6",
+      "target": "slime0.opacity",
+      "scale": 0.9,
+      "smoothing": 0.35
+    },
+    {
+      "source": "section.n:2",
+      "target": "lenia1.opacity",
+      "scale": 1.0,
+      "smoothing": 0.35
+    },
+    {
+      "source": "section.n:3",
+      "target": "pl0.opacity",
+      "scale": 1.0,
+      "smoothing": 0.35
+    },
+    {
+      "source": "section.n:6",
+      "target": "pl0.opacity",
+      "scale": 0.7,
+      "smoothing": 0.35
+    },
+    {
+      "_": "— 生命体のルール —",
+      "source": "rms",
+      "target": "lenia0.dt",
+      "scale": 0.55,
+      "smoothing": 0.12
+    },
+    {
+      "source": "kick.trigger",
+      "target": "lenia0.injectAmount",
+      "scale": 0.3
+    },
+    {
+      "source": "lane.tension",
+      "target": "lenia0.muJitter",
+      "scale": 0.03,
+      "smoothing": 0.8
+    },
+    {
+      "_": "セクションのエネルギーが Lenia の相そのものを決める",
+      "source": "section.energy",
+      "target": "lenia0.growthMu",
+      "scale": 0.035,
+      "offset": 0.13,
+      "mode": "set",
+      "smoothing": 1.2
+    },
+    {
+      "source": "section.is:coda",
+      "target": "lenia0.dt",
+      "scale": 0.06,
+      "smoothing": 2.0
+    },
+    {
+      "_": "走性の強さ。明るさの漏れを抑える要でもある",
+      "source": "lane.tension",
+      "target": "slime0.attractorWeight",
+      "scale": 0.9,
+      "offset": 0.6,
+      "mode": "set",
+      "smoothing": 1.0
+    },
+    {
+      "_": "CA の代謝",
+      "source": "lane.tension",
+      "target": "ca0.stepsPerFrame",
+      "scale": 2.0,
+      "offset": 1.0,
+      "mode": "set",
+      "smoothing": 1.0
+    },
+    {
+      "_": "granular_freeze で場を止める",
+      "source": "event:granular_freeze.active",
+      "target": "lenia0.freeze",
+      "scale": 1.0
+    },
+    {
+      "source": "event:granular_freeze.active",
+      "target": "slime0.freeze",
+      "scale": 1.0
+    },
+    {
+      "source": "event:granular_freeze.active",
+      "target": "lenia1.freeze",
+      "scale": 1.0
+    },
+    {
+      "source": "event:granular_freeze.active",
+      "target": "pl0.freeze",
+      "scale": 1.0
+    },
+    {
+      "source": "event:granular_freeze.active",
+      "target": "ca0.freeze",
+      "scale": 1.0
+    },
+    {
+      "_": "reverse_swell で生命を生み直す（3回）",
+      "source": "event:reverse_swell.started",
+      "target": "lenia0.reseed",
+      "scale": 1.0
+    },
+    {
+      "source": "event:reverse_swell.started",
+      "target": "pl0.reseed",
+      "scale": 1.0
+    },
+    {
+      "source": "event:reverse_swell.started",
+      "target": "lenia1.reseed",
+      "scale": 1.0
+    },
+    {
+      "_": "warp_filter のカットオフはそのイベントが鳴っている間だけ視野を変える",
+      "source": "event:warp_filter.cutoff_hz",
+      "target": "slime0.sensorDistance",
+      "inMin": 200.0,
+      "inMax": 8000.0,
+      "scale": 3.0,
+      "offset": 2.5,
+      "mode": "set",
+      "smoothing": 0.25
+    },
+    {
+      "source": "lane.spatial_active",
+      "target": "slime0.turnSpeed",
+      "scale": 6.0,
+      "smoothing": 0.4
+    },
+    {
+      "_": "suspend の静けさに、まれな kick が新しい器官を生む",
+      "source": "kick.trigger",
+      "target": "lenia1.injectAmount",
+      "scale": 0.2,
+      "smoothing": 0.02
+    }
+  ]
+}

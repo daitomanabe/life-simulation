@@ -1,0 +1,31 @@
+{
+  "_note": [
+    "tests/music_timeline_check.sh 専用。Lenia 単体なので、フレームが変わらない",
+    "= 場が止まっている、と一対一で言える（Slime を混ぜると凍結中も動いてしまう）。",
+    "低解像度・小半径で速く回す。"
+  ],
+  "seed": 4242,
+  "resolution": [384, 216],
+  "modules": [
+    {
+      "type": "Lenia",
+      "name": "lenia0",
+      "enabled": true,
+      "params": {
+        "radius": 9,
+        "dt": 0.35,
+        "growthMu": 0.15,
+        "growthSigma": 0.017,
+        "initCoverage": 0.40,
+        "initScale": 18.0,
+        "blend": "add",
+        "opacity": 1.0,
+        "colorMap": { "palette": "mono", "channel": 0, "inputScale": 1.0 }
+      }
+    }
+  ],
+  "musicMappings": [
+    { "source": "event:granular_freeze.active", "target": "lenia0.freeze", "scale": 1.0 },
+    { "source": "event:reverse_swell.started",  "target": "lenia0.reseed", "scale": 1.0 }
+  ]
+}

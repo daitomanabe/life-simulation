@@ -24,6 +24,12 @@ snare → kernel/topology、hihat → micro noise、fft → force field）。
 | 10 | 動画書き出し (AVAssetWriter, ProRes/HEVC/H264) | ✅ 完了 |
 | 11 | Lenia オーガニズムプリセット (公式データ移植) | 実装中 |
 | 12 | Fluid⇄Slime 双方向結合 | ✅ 完了 |
+| 13 | 楽曲構造への反応 (MusicTimeline / `--music`) | ✅ 完了 |
+
+Phase 13 は、音の *強さ*（`--audio`）とは別に、音の *意味* — セクション・イベント・
+イベント自身の 60fps オートメーション曲線 — を `--music <events.json>` から
+直接ルールへ流す層。強さは運動へ、構造はルールへ。詳細と落とし穴は
+[docs/music_reactive.md](docs/music_reactive.md)。検証は `bash tests/music_timeline_check.sh`。
 
 開発体制: 設計・レビュー・検証 = Fable、実装 = Sonnet サブエージェント。
 各フェーズの実装仕様書は `docs/specs/phaseN_*.md`。
