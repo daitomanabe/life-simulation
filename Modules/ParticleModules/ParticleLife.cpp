@@ -55,8 +55,12 @@ void ParticleLifeModule::setup(SimulationContext& ctx) {
     md.label = instanceName_ + ".matrix";
     matrix_ = ctx.resources->createBuffer(md);
 
-    // Per-species cosine palette (K×4 floats, rgb + pad). Depends only on K,
-    // so fill it once here.
+    // Per-species palette (K×4 floats, rgb + pad). Depends only on K, so fill
+    // it once here. Default is the hue-wheel cosine palette. Setting
+    // "monoColor": true collapses every species to white with only a
+    // brightness step between them — for the #000/#fff VJ look, where any hue
+    // reads as a mistake. Kept opt-in so existing scenes are unchanged.
+    const bool monoColor = jsonParams().value("monoColor", false);
     BufferDesc cd;
     cd.size = size_t(K) * 4 * sizeof(float);
     cd.storage = StorageMode::Shared;
@@ -65,9 +69,15 @@ void ParticleLifeModule::setup(SimulationContext& ctx) {
     if (auto* c = static_cast<float*>(ctx.resources->bufferContents(speciesColor_))) {
         for (uint32_t s = 0; s < K; ++s) {
             float t = float(s) / float(K);
-            const float phase[3] = {0.0f, 0.33f, 0.67f};
-            for (int ch = 0; ch < 3; ++ch)
-                c[s * 4 + ch] = 0.5f + 0.5f * std::cos(6.2832f * (t + phase[ch]));
+            if (monoColor) {
+                // 0.55..1.0 の白の濃淡。種の違いは明度だけで出す。
+                float v = 0.55f + 0.45f * t;
+                c[s * 4 + 0] = c[s * 4 + 1] = c[s * 4 + 2] = v;
+            } else {
+                const float phase[3] = {0.0f, 0.33f, 0.67f};
+                for (int ch = 0; ch < 3; ++ch)
+                    c[s * 4 + ch] = 0.5f + 0.5f * std::cos(6.2832f * (t + phase[ch]));
+            }
             c[s * 4 + 3] = 1.0f;
         }
     }
