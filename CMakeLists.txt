@@ -113,6 +113,8 @@ add_library(lifecore STATIC
   LifeCore/Audio/OSCReceiver.cpp
   LifeCore/Audio/FeatureSmoother.cpp
   LifeCore/Audio/AudioInput.cpp
+  # Music (events JSON → 楽曲構造。Audio が「強さ」、こちらが「意味」)
+  LifeCore/Music/MusicTimeline.cpp
   # Params
   LifeCore/Params/ParameterBus.cpp
   LifeCore/Params/Scene.cpp

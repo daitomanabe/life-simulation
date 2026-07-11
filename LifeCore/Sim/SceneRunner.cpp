@@ -3,6 +3,8 @@
 
 #include "LifeCore/Sim/ModuleFactory.h"
 
+#include <algorithm>
+
 namespace life {
 
 SceneRunner::~SceneRunner() {
@@ -72,6 +74,10 @@ std::unique_ptr<SceneRunner> SceneRunner::create(const SceneRunnerDesc& desc,
         outError = "scene contains no enabled modules";
         return nullptr;
     }
+    runner->reseedWasHigh_.assign(runner->modules_.size(), 0);
+    runner->visibleWasHigh_.assign(runner->modules_.size(), 0);
+    runner->encodedOnce_.assign(runner->modules_.size(), 0);
+    runner->layerLiveOpacity_.assign(runner->modules_.size(), 0.0f);
 
     // Resolve scene.connections into module-pointer pairs once, up front.
     // "lenia0.field" -> name="lenia0", port="field"; no '.' means port
@@ -117,10 +123,22 @@ void SceneRunner::reset() {
     frameIndex_ = 0;
     simTime_ = 0.0f;
     for (auto& m : modules_) m->reset(desc_.scene.seed);
+    std::fill(reseedWasHigh_.begin(), reseedWasHigh_.end(), 0);
+    std::fill(visibleWasHigh_.begin(), visibleWasHigh_.end(), 0);
+    std::fill(encodedOnce_.begin(), encodedOnce_.end(), 0);
+    std::fill(layerLiveOpacity_.begin(), layerLiveOpacity_.end(), 0.0f);
 }
 
 void SceneRunner::step(const AudioFeatureState& audio, float dt, const StepOptions& opts) {
-    params_.update(audio, dt);
+    MusicFeatureState music;
+    music.audio = audio;
+    music.frame = frameIndex_;
+    step(music, dt, opts);
+}
+
+void SceneRunner::step(const MusicFeatureState& music, float dt, const StepOptions& opts) {
+    const AudioFeatureState& audio = music.audio;
+    params_.update(music, dt);
 
     SimulationContext ctx;
     ctx.metal = metal_.get();
@@ -150,13 +168,53 @@ void SceneRunner::step(const AudioFeatureState& audio, float dt, const StepOptio
     for (auto& c : resolvedConnections_)
         c.dst->bindNamedInput(c.dstPort, c.src->namedOutput(c.srcPort));
 
-    for (auto& m : modules_) m->encode(ctx);
+    for (size_t i = 0; i < modules_.size(); ++i) {
+        SimulationModule* m = modules_[i].get();
+        const std::string& n = m->instanceName();
+
+        // このフレームで見えるか。opacity は毎フレーム引くので、musicMappings が
+        // セクションごとに「どの生命を見せるか」を切り替えられる（VJ の
+        // Composition が phrase ごとにシーンを差し替えるのと同じ考え方）。
+        const float op = params_.value(n + ".opacity", layerOpacities_[i]);
+        layerLiveOpacity_[i] = op;
+        const bool visible = op > VISIBLE_EPS;
+
+        // 隠れた層は encode を飛ばす（見えない生命に GPU を割かない）。5 層を
+        // 常時回すと GPU 75ms/frame だが、一度に 1〜2 層しか見せないなら 15ms 台。
+        // 生命なので「止めて再開」は嘘になる — 代わりに、再び現れる瞬間に
+        // reset() で生まれ直させる。隠れている間の時間経過は演じない。
+        const bool appearing = visible && !visibleWasHigh_[i];
+        visibleWasHigh_[i] = visible ? 1 : 0;
+        if (!visible) continue;
+
+        // reseed: 0.5 を跨いだ立ち上がり、または層が現れた瞬間に再初期化。種は
+        // シーン種とフレーム番号から決まるので、同じ入力なら毎回同じ形に生まれ
+        // 変わる（frame 0 では seed^0 == seed なので、初期可視の層は reset() の
+        // 結果を保つ = 既存プリセットと決定性テストはバイト不変）。
+        const bool reseedHigh = params_.value(n + ".reseed", 0.0f) > 0.5f;
+        if (appearing || (reseedHigh && !reseedWasHigh_[i])) {
+            m->reset(desc_.scene.seed ^ (frameIndex_ * 2654435761u));
+            encodedOnce_[i] = 0;
+        }
+        reseedWasHigh_[i] = reseedHigh ? 1 : 0;
+
+        // freeze: encode を丸ごと飛ばす。出力テクスチャは前フレームの内容を
+        // 保ったまま合成される。まだ一度も encode していないモジュールは、
+        // 出力テクスチャが未定義なので凍結させない。
+        const bool freeze =
+            encodedOnce_[i] && params_.value(n + ".freeze", 0.0f) > 0.5f;
+        if (freeze) continue;
+
+        m->encode(ctx);
+        encodedOnce_[i] = 1;
+    }
 
     std::vector<CompositeLayer> layers;
     layers.reserve(modules_.size());
     for (size_t i = 0; i < modules_.size(); ++i) {
+        if (!encodedOnce_[i] || layerLiveOpacity_[i] <= VISIBLE_EPS) continue;
         layers.push_back(
-            {modules_[i]->outputTexture(), layerModes_[i], layerOpacities_[i]});
+            {modules_[i]->outputTexture(), layerModes_[i], layerLiveOpacity_[i]});
     }
     composite_.encode(*graph_, layers, renderTarget_, desc_.scene.width,
                       desc_.scene.height);

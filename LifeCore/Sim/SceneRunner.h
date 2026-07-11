@@ -5,14 +5,22 @@
 // output policy differ per app (design doc §17.3 / §22-9,10).
 //
 // Frame flow (§6.2):
-//   step(audio):
-//     ParameterBus.update(audio)
-//     module.updateCPU(audio)          (all modules)
+//   step(music):
+//     ParameterBus.update(music)
+//     module.updateCPU(music.audio)    (all modules)
 //     graph.beginFrame
 //       module.encode                  (simulation passes, substeps inside)
 //       composite                      (layers → RGBA16F render target)
 //       [readback]                     (only when requested)
 //     graph.endFrame(wait)
+//
+// 予約パラメータ（モジュール側の実装は不要 — ここで解釈する）:
+//   "<module>.freeze"  > 0.5 の間、そのモジュールの encode を飛ばす。場は
+//                      最後の状態のまま合成され続ける。granular_freeze 用。
+//   "<module>.reseed"  0.5 を跨いで立ち上がった瞬間に reset() する。種は
+//                      scene.seed とフレーム番号から決まるので再現性がある。
+// どちらも musicMappings から駆動できる。SimulationModule に仮想関数を
+// 足さずに済むのは、両者が「モジュールを呼ぶか呼ばないか」の話だからだ。
 
 #include "LifeCore/IO/FrameRecorder.h"
 #include "LifeCore/Metal/CommandGraph.h"
@@ -53,7 +61,10 @@ public:
     void reset();
 
     // Advance one frame. dt is the simulation timestep for this frame.
+    // 音のみ（従来の呼び出し。構造レーンは全て 0 として扱われる）。
     void step(const AudioFeatureState& audio, float dt, const StepOptions& opts = {});
+    // 音 + 楽曲構造。--music を渡したアプリはこちらを呼ぶ。
+    void step(const MusicFeatureState& music, float dt, const StepOptions& opts = {});
 
     TextureHandle outputTexture() const { return renderTarget_; }
     uint32_t frameIndex() const { return frameIndex_; }
@@ -114,6 +125,13 @@ private:
     std::vector<ResolvedConnection> resolvedConnections_;
     std::vector<BlendMode> layerModes_;
     std::vector<float> layerOpacities_;
+    // 予約パラメータの立ち上がり検出 / 「一度も encode していないモジュールは
+    // 凍結できない」ためのガード（出力テクスチャがまだ未定義なので）。
+    std::vector<uint8_t> reseedWasHigh_;
+    std::vector<uint8_t> visibleWasHigh_;  // 隠れ→表示の立ち上がりで生まれ直す
+    std::vector<uint8_t> encodedOnce_;
+    std::vector<float> layerLiveOpacity_;  // このフレームの実 opacity（合成で再利用）
+    static constexpr float VISIBLE_EPS = 0.02f;
     TextureHandle renderTarget_;
     uint32_t frameIndex_ = 0;
     float simTime_ = 0.0f;

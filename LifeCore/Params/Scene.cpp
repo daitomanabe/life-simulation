@@ -43,19 +43,30 @@ std::optional<Scene> Scene::parse(const nlohmann::json& j, std::string& outError
             }
             scene.modules.push_back(std::move(spec));
         }
-        for (const auto& a : j.value("audioMappings", nlohmann::json::array())) {
-            AudioMappingSpec spec;
-            spec.source = a.value("source", "");
-            spec.target = a.value("target", "");
-            spec.scale = a.value("scale", 1.0f);
-            spec.offset = a.value("offset", 0.0f);
-            spec.smoothing = a.value("smoothing", 0.0f);
-            if (spec.source.empty() || spec.target.empty()) {
-                outError = "audioMapping entry missing source/target";
-                return std::nullopt;
+        // audioMappings と musicMappings は同じ形。分けてあるのは意図の宣言の
+        // ためで、どちらに書いても同じ経路を通る（ParameterBus が source 名で
+        // 音・レーン・セクション・イベントを見分ける）。
+        auto readMappings = [&](const char* key) -> bool {
+            for (const auto& a : j.value(key, nlohmann::json::array())) {
+                AudioMappingSpec spec;
+                spec.source = a.value("source", "");
+                spec.target = a.value("target", "");
+                spec.inMin = a.value("inMin", 0.0f);
+                spec.inMax = a.value("inMax", 0.0f);
+                spec.scale = a.value("scale", 1.0f);
+                spec.offset = a.value("offset", 0.0f);
+                spec.smoothing = a.value("smoothing", 0.0f);
+                spec.mode = mappingModeFromString(a.value("mode", "add"));
+                if (spec.source.empty() || spec.target.empty()) {
+                    outError = std::string(key) + " entry missing source/target";
+                    return false;
+                }
+                scene.audioMappings.push_back(std::move(spec));
             }
-            scene.audioMappings.push_back(std::move(spec));
-        }
+            return true;
+        };
+        if (!readMappings("audioMappings")) return std::nullopt;
+        if (!readMappings("musicMappings")) return std::nullopt;
         for (const auto& c : j.value("connections", nlohmann::json::array())) {
             ConnectionSpec spec;
             spec.from = c.value("from", "");
