@@ -44,6 +44,10 @@ std::unique_ptr<SceneRunner> SceneRunner::create(const SceneRunnerDesc& desc,
         return nullptr;
     }
 
+    if (!runner->post_.configure(desc.scene.raw, *runner->resources_, desc.scene.width,
+                                 desc.scene.height, outError))
+        return nullptr;
+
     // Instantiate scene modules through the factory.
     desc.scene.applyBaseParams(runner->params_);
     for (const auto& spec : desc.scene.modules) {
@@ -218,6 +222,7 @@ void SceneRunner::step(const MusicFeatureState& music, float dt, const StepOptio
     }
     composite_.encode(*graph_, layers, renderTarget_, desc_.scene.width,
                       desc_.scene.height);
+    post_.encode(*graph_, renderTarget_);
 
     // sink-less path costs one empty-vector loop check (design doc phase 6:
     // "sink なしの経路にコストゼロ").

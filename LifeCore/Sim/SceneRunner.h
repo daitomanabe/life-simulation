@@ -31,6 +31,7 @@
 #include "LifeCore/Params/ParameterBus.h"
 #include "LifeCore/Params/Scene.h"
 #include "LifeCore/Render/CompositePass.h"
+#include "LifeCore/Render/PostPass.h"
 #include "LifeCore/Sim/SimulationModule.h"
 
 #include <memory>
@@ -120,6 +121,7 @@ private:
     std::unique_ptr<FrameRecorder> recorder_;
     ParameterBus params_;
     CompositePass composite_;
+    PostPass post_; // scene-level "post" block (bloom); no-op without it
 
     std::vector<std::unique_ptr<SimulationModule>> modules_;
     std::vector<ResolvedConnection> resolvedConnections_;

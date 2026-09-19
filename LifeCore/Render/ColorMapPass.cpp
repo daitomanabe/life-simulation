@@ -30,6 +30,9 @@ void ColorMapPass::configure(const nlohmann::json& moduleParams) {
         float len = std::sqrt(relief.lightX * relief.lightX + relief.lightY * relief.lightY +
                               relief.lightZ * relief.lightZ);
         if (len > 1e-6f) { relief.lightX /= len; relief.lightY /= len; relief.lightZ /= len; }
+        baseLightX_ = relief.lightX;
+        baseLightY_ = relief.lightY;
+        lightSpin_ = r.value("lightSpin", 0.0f);
         relief.ambient = r.value("ambient", relief.ambient);
         relief.diffuse = r.value("diffuse", relief.diffuse);
         relief.specular = r.value("specular", relief.specular);
@@ -93,6 +96,11 @@ void ColorMapPass::encode(CommandGraph& graph, const std::string& label,
         relief.width = width;
         relief.height = height;
         relief.frame++; // grain reseed; once per encode, so still deterministic
+        if (lightSpin_ != 0.0f) {
+            float a = lightSpin_ * (float(relief.frame) / 60.0f) * 0.01745329252f;
+            relief.lightX = baseLightX_ * std::cos(a) - baseLightY_ * std::sin(a);
+            relief.lightY = baseLightX_ * std::sin(a) + baseLightY_ * std::cos(a);
+        }
         graph.pass(label)
             .pipeline("reliefShadeField")
             .read(0, field)

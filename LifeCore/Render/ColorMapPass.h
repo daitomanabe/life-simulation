@@ -84,6 +84,12 @@ public:
     // encodeScaled() (Lenia at a separate sim resolution) still uses the palette.
     bool reliefEnabled = false;
     ReliefParams relief;
+
+private:
+    // "lightSpin": degrees per second (at 60 fps) the light turns about the
+    // wall normal, so highlights and shadows sweep slowly across the relief.
+    float lightSpin_ = 0.0f;
+    float baseLightX_ = 0.0f, baseLightY_ = 0.0f;
 };
 
 } // namespace life

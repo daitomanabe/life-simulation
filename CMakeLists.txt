@@ -124,6 +124,7 @@ add_library(lifecore STATIC
   # Render
   LifeCore/Render/ColorMapPass.cpp
   LifeCore/Render/CompositePass.cpp
+  LifeCore/Render/PostPass.cpp
   LifeCore/Particle/ParticleSplatPass.cpp
   # Spatial
   LifeCore/Spatial/SpatialHashGrid.cpp
