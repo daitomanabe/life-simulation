@@ -70,8 +70,10 @@ private:
         uint32_t frameIndex = 0;
         float dyeInject = 0.02f; // dye replacement per frame at impulse center
         float forceFieldGain = 0.0f; // Phase 12: gradient force from forceField input
+        uint32_t wallY = 0;          // strip world: floor/ceiling are walls, x still wraps
+        float driftX = 0.0f;         // px/s^2 along x, sin profile in y
     };
-    static_assert(sizeof(FluidParams) == 17 * 4,
+    static_assert(sizeof(FluidParams) == 19 * 4,
                   "FluidParams layout must stay scalar-packed to match MSL");
 
     Field2D velocity_;   // RG32F, ping-pong, wrap

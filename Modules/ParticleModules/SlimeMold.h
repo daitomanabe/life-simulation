@@ -83,6 +83,7 @@ private:
         uint32_t height = 0;
         float attractorWeight = 0.0f; // Phase 5: weight of attractorField in the sensor read
         float flowWeight = 0.0f;      // Phase 12: how strongly flowField advects agents
+        uint32_t wallY = 0;           // strip world: floor/ceiling are walls, x still wraps
     };
 
     ParticleSet2D set_;

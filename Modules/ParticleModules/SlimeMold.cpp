@@ -110,6 +110,7 @@ void SlimeMoldModule::encode(SimulationContext& ctx) {
     gpuParams_.spawnMode = uint32_t(param(ctx, "spawnMode", 0.0f) + 0.5f);
     gpuParams_.attractorWeight = param(ctx, "attractorWeight", 0.0f);
     gpuParams_.flowWeight = param(ctx, "flowWeight", 0.0f);
+    gpuParams_.wallY = param(ctx, "wallY", 0.0f) > 0.5f ? 1u : 0u;
     gpuParams_.frameIndex = ctx.frameIndex;
 
     AudioUniforms au = toAudioUniforms(audio_);

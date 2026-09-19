@@ -104,6 +104,8 @@ void FluidModule::encode(SimulationContext& ctx) {
     gpuParams_.injectHue = param(ctx, "injectHue", 0.0f);
     gpuParams_.dyeInject = param(ctx, "dyeInject", 0.02f);
     gpuParams_.forceFieldGain = param(ctx, "forceFieldGain", 0.0f);
+    gpuParams_.wallY = param(ctx, "wallY", 0.0f) > 0.5f ? 1u : 0u;
+    gpuParams_.driftX = param(ctx, "driftX", 0.0f);
     // low/mid/high are transcribed straight from AudioFeatureState (design
     // point: not scene-base-value params, so no ParameterBus indirection).
     gpuParams_.low = audio_.low;

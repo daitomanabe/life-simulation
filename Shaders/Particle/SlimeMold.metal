@@ -27,6 +27,7 @@ struct SlimeParams {
     uint height;
     float attractorWeight; // Phase 5: weight of attractorField in the sensor read
     float flowWeight;      // Phase 12: how strongly flowField advects agents
+    uint wallY;            // strip world: floor/ceiling are walls (x stays toroidal). 0 = torus
 };
 
 // Advances a per-agent PCG stream held in thread-local state and returns the
@@ -55,6 +56,17 @@ static float2 slimeSpawnPosition(uint spawnMode, float w, float h, thread uint& 
         return center + float2(cos(a), sin(a)) * r;
     }
     return float2(slimeNextRand(state) * w, slimeNextRand(state) * h);
+}
+
+// One sensor read: trail blended with the coupled attractor (Phase 5 §3a).
+// In a walled strip a sensor poking past floor/ceiling reads 0 — nothing to
+// follow out there — which also keeps agents from piling up along the wall.
+static float slimeSense(texture2d<float, access::sample> trail,
+                        texture2d<float, access::sample> attractor,
+                        float2 q, float w, float h, constant SlimeParams& p) {
+    if (p.wallY != 0u && (q.y < 0.0f || q.y >= h)) return 0.0f;
+    return sampleFieldWrap(trail, q, w, h) +
+           p.attractorWeight * sampleFieldWrap(attractor, q, w, h);
 }
 
 kernel void slimeInit(device float2* positions [[buffer(0)]],
@@ -139,12 +151,9 @@ kernel void slimeMove(device float2* positions [[buffer(0)]],
     // attractor field (e.g. a Lenia density), weighted by attractorWeight.
     // attractor is a 4x4 black fallback when no scene connection targets
     // "attractorField", so this is a no-op (sense == trail-only) by default.
-    float F = sampleFieldWrap(trail, pos + dirF * p.sensorDistance, w, h) +
-              p.attractorWeight * sampleFieldWrap(attractor, pos + dirF * p.sensorDistance, w, h);
-    float L = sampleFieldWrap(trail, pos + dirL * p.sensorDistance, w, h) +
-              p.attractorWeight * sampleFieldWrap(attractor, pos + dirL * p.sensorDistance, w, h);
-    float R = sampleFieldWrap(trail, pos + dirR * p.sensorDistance, w, h) +
-              p.attractorWeight * sampleFieldWrap(attractor, pos + dirR * p.sensorDistance, w, h);
+    float F = slimeSense(trail, attractor, pos + dirF * p.sensorDistance, w, h, p);
+    float L = slimeSense(trail, attractor, pos + dirL * p.sensorDistance, w, h, p);
+    float R = slimeSense(trail, attractor, pos + dirR * p.sensorDistance, w, h, p);
 
     // Jones 2010 standard steer: go straight when the front sensor leads,
     // turn toward the stronger side sensor, and pick randomly when the
@@ -180,11 +189,18 @@ kernel void slimeMove(device float2* positions [[buffer(0)]],
     // Phase 12: external flow (e.g. fluid velocity) carries the agent;
     // heading is untouched so trail-following continues while drifting.
     float2 drift = (p.flowWeight != 0.0f)
-        ? sampleFieldWrap4(flow, pos, w, h).xy * p.flowWeight
+        ? sampleFieldWrap4(flow, edgePos(pos, h, p.wallY), w, h).xy * p.flowWeight
         : float2(0.0f, 0.0f);
     pos += (heading * p.moveSpeed + drift) * p.dt;
     pos.x = fract(pos.x / w) * w;
-    pos.y = fract(pos.y / h) * h;
+    if (p.wallY != 0u) {
+        // Bounce off floor/ceiling.
+        if (pos.y < 0.0f) { pos.y = -pos.y; heading.y = -heading.y; }
+        else if (pos.y >= h) { pos.y = 2.0f * h - pos.y; heading.y = -heading.y; }
+        pos.y = clamp(pos.y, 0.0f, h - 0.001f);
+    } else {
+        pos.y = fract(pos.y / h) * h;
+    }
 
     uint2 cell = uint2(min(uint(pos.x), p.width - 1u), min(uint(pos.y), p.height - 1u));
     uint idx = cell.y * p.width + cell.x;
@@ -207,7 +223,7 @@ kernel void slimeTrailUpdate(texture2d<float, access::read> trailIn [[texture(0)
     float sum = 0.0f;
     for (int dy = -1; dy <= 1; ++dy) {
         for (int dx = -1; dx <= 1; ++dx) {
-            uint2 q = wrapCoord(base + int2(dx, dy), p.width, p.height);
+            uint2 q = edgeCoord(base + int2(dx, dy), p.width, p.height, p.wallY);
             sum += trailIn.read(q).x;
         }
     }

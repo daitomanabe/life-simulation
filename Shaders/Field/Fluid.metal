@@ -2,9 +2,10 @@
 // Stable Fluids (Stam 1999 / GPU Gems ch.38): semi-Lagrangian advection +
 // Jacobi-relaxed pressure projection, over a velocity field (RG32F) and a
 // colored dye field (RGBA16F) that IS the visual. Toroidal (wrap) boundary
-// throughout — no obstacles, no walls, so every pass is a plain wrapCoord /
-// repeat-sampler read (design doc §7.5). Matches life::FluidModule::
-// FluidParams (scalar-packed, same order).
+// by default — no obstacles, so every pass is a plain wrapCoord / repeat-
+// sampler read (design doc §7.5). wallY turns floor/ceiling into walls for a
+// strip world (edgeCoord / edgePos, x still wraps). Matches
+// life::FluidModule::FluidParams (scalar-packed, same order).
 
 struct FluidParams {
     uint width;
@@ -24,6 +25,8 @@ struct FluidParams {
     uint frameIndex;
     float dyeInject; // dye replacement fraction at impulse center (velocity-independent)
     float forceFieldGain; // Phase 12: gradient force from the bound forceField
+    uint wallY;   // strip world: floor/ceiling are walls (x stays toroidal). 0 = torus
+    float driftX; // px/s^2 along x, sin profile in y (0 at floor/ceiling, max mid-height)
 };
 
 // ---- fluidPresent's own tiny uniform (Phase 8 §1: dye -> output is a plain
@@ -66,7 +69,7 @@ kernel void fluidAdvectVel(texture2d<float, access::sample> velR [[texture(0)]],
     float2 pos = float2(gid) + 0.5f;
     float w = float(p.width), h = float(p.height);
     float2 v = sampleFieldWrap4(velR, pos, w, h).xy;
-    float2 prev = pos - v * p.dt;
+    float2 prev = edgePos(pos - v * p.dt, h, p.wallY);
     float2 adv = sampleFieldWrap4(velR, prev, w, h).xy;
     adv *= exp(-p.velDissipation * p.dt);
 
@@ -102,12 +105,25 @@ kernel void fluidForces(texture2d<float, access::read> velR [[texture(0)]],
     float2 impulsePos = float2(rand01(uint2(cycle, 0u), 9001u, p.seed),
                                rand01(uint2(cycle, 1u), 9002u, p.seed)) * world;
     float2 d = pixelPos - impulsePos;
-    d -= world * round(d / world); // minimum image (toroidal)
+    // Torus branch is the original expression verbatim: splitting it changes
+    // FMA contraction under fast-math and breaks bit-exact output.
+    if (p.wallY == 0u) {
+        d -= world * round(d / world); // minimum image (toroidal)
+    } else {
+        d.x -= world.x * round(d.x / world.x); // walls: no image across floor/ceiling
+    }
     float r2 = dot(d, d);
     float R = max(p.impulseRadius, 1.0f);
     float falloff = exp(-r2 / (R * R));
     float2 dir = (r2 > 1e-6f) ? d * rsqrt(r2) : float2(0.0f, 0.0f);
     vel += p.impulse * falloff * dir;
+
+    // Strip world: a body force along the band. The sin profile is zero at
+    // floor/ceiling and peaks mid-height, so it drives shear (eddies rolling
+    // along the wall) rather than a rigid scroll of the whole picture.
+    if (p.driftX != 0.0f) {
+        vel.x += p.driftX * sin(3.14159265359f * pixelPos.y / world.y) * p.dt;
+    }
 
     // hihat -> turbulence: per-pixel random-angle micro force.
     if (p.turbulence > 0.0f) {
@@ -143,8 +159,8 @@ kernel void fluidForces(texture2d<float, access::read> velR [[texture(0)]],
         float w = float(p.width), h = float(p.height);
         float gx = sampleFieldWrap(forceField, pixelPos + float2(e, 0.0f), w, h)
                  - sampleFieldWrap(forceField, pixelPos - float2(e, 0.0f), w, h);
-        float gy = sampleFieldWrap(forceField, pixelPos + float2(0.0f, e), w, h)
-                 - sampleFieldWrap(forceField, pixelPos - float2(0.0f, e), w, h);
+        float gy = sampleFieldWrap(forceField, edgePos(pixelPos + float2(0.0f, e), h, p.wallY), w, h)
+                 - sampleFieldWrap(forceField, edgePos(pixelPos - float2(0.0f, e), h, p.wallY), w, h);
         vel += float2(gx, gy) * p.forceFieldGain;
     }
 
@@ -160,6 +176,18 @@ static float fluidCurlAt(texture2d<float, access::read> velR, int2 p, uint w, ui
     float vyxm = velR.read(wrapCoord(p + int2(-1, 0), w, h)).y;
     float vxyp = velR.read(wrapCoord(p + int2(0, 1), w, h)).x;
     float vxym = velR.read(wrapCoord(p + int2(0, -1), w, h)).x;
+    return 0.5f * ((vyxp - vyxm) - (vxyp - vxym));
+}
+
+// Walled-strip sibling (y clamps at floor/ceiling). Deliberately a separate
+// function: threading a wallY argument through fluidCurlAt changes how
+// fast-math reassociates the torus path and breaks bit-exact output of every
+// existing fluid scene (verified by bisection against frame MD5s).
+static float fluidCurlAtWall(texture2d<float, access::read> velR, int2 p, uint w, uint h) {
+    float vyxp = velR.read(edgeCoord(p + int2(1, 0), w, h, 1u)).y;
+    float vyxm = velR.read(edgeCoord(p + int2(-1, 0), w, h, 1u)).y;
+    float vxyp = velR.read(edgeCoord(p + int2(0, 1), w, h, 1u)).x;
+    float vxym = velR.read(edgeCoord(p + int2(0, -1), w, h, 1u)).x;
     return 0.5f * ((vyxp - vyxm) - (vxyp - vxym));
 }
 
@@ -179,11 +207,20 @@ kernel void fluidVorticity(texture2d<float, access::read> velR [[texture(0)]],
     float2 vel = velR.read(gid).xy;
 
     if (p.vorticity > 0.0f) {
-        float c = fluidCurlAt(velR, ip, p.width, p.height);
-        float cxp = abs(fluidCurlAt(velR, ip + int2(1, 0), p.width, p.height));
-        float cxm = abs(fluidCurlAt(velR, ip + int2(-1, 0), p.width, p.height));
-        float cyp = abs(fluidCurlAt(velR, ip + int2(0, 1), p.width, p.height));
-        float cym = abs(fluidCurlAt(velR, ip + int2(0, -1), p.width, p.height));
+        float c, cxp, cxm, cyp, cym;
+        if (p.wallY == 0u) {
+            c = fluidCurlAt(velR, ip, p.width, p.height);
+            cxp = abs(fluidCurlAt(velR, ip + int2(1, 0), p.width, p.height));
+            cxm = abs(fluidCurlAt(velR, ip + int2(-1, 0), p.width, p.height));
+            cyp = abs(fluidCurlAt(velR, ip + int2(0, 1), p.width, p.height));
+            cym = abs(fluidCurlAt(velR, ip + int2(0, -1), p.width, p.height));
+        } else {
+            c = fluidCurlAtWall(velR, ip, p.width, p.height);
+            cxp = abs(fluidCurlAtWall(velR, ip + int2(1, 0), p.width, p.height));
+            cxm = abs(fluidCurlAtWall(velR, ip + int2(-1, 0), p.width, p.height));
+            cyp = abs(fluidCurlAtWall(velR, ip + int2(0, 1), p.width, p.height));
+            cym = abs(fluidCurlAtWall(velR, ip + int2(0, -1), p.width, p.height));
+        }
 
         float2 grad = 0.5f * float2(cxp - cxm, cyp - cym);
         float len = length(grad);
@@ -206,10 +243,10 @@ kernel void fluidDivergence(texture2d<float, access::read> velR [[texture(0)]],
     if (gid.x >= p.width || gid.y >= p.height) return;
 
     int2 ip = int2(gid);
-    float vxp = velR.read(wrapCoord(ip + int2(1, 0), p.width, p.height)).x;
-    float vxm = velR.read(wrapCoord(ip + int2(-1, 0), p.width, p.height)).x;
-    float vyp = velR.read(wrapCoord(ip + int2(0, 1), p.width, p.height)).y;
-    float vym = velR.read(wrapCoord(ip + int2(0, -1), p.width, p.height)).y;
+    float vxp = velR.read(edgeCoord(ip + int2(1, 0), p.width, p.height, p.wallY)).x;
+    float vxm = velR.read(edgeCoord(ip + int2(-1, 0), p.width, p.height, p.wallY)).x;
+    float vyp = velR.read(edgeCoord(ip + int2(0, 1), p.width, p.height, p.wallY)).y;
+    float vym = velR.read(edgeCoord(ip + int2(0, -1), p.width, p.height, p.wallY)).y;
     float div = 0.5f * ((vxp - vxm) + (vyp - vym));
 
     divW.write(float4(div, 0.0f, 0.0f, 0.0f), gid);
@@ -227,10 +264,10 @@ kernel void fluidJacobi(texture2d<float, access::read> pR [[texture(0)]],
     if (gid.x >= p.width || gid.y >= p.height) return;
 
     int2 ip = int2(gid);
-    float pl = pR.read(wrapCoord(ip + int2(-1, 0), p.width, p.height)).x;
-    float pr = pR.read(wrapCoord(ip + int2(1, 0), p.width, p.height)).x;
-    float pt = pR.read(wrapCoord(ip + int2(0, -1), p.width, p.height)).x;
-    float pb = pR.read(wrapCoord(ip + int2(0, 1), p.width, p.height)).x;
+    float pl = pR.read(edgeCoord(ip + int2(-1, 0), p.width, p.height, p.wallY)).x;
+    float pr = pR.read(edgeCoord(ip + int2(1, 0), p.width, p.height, p.wallY)).x;
+    float pt = pR.read(edgeCoord(ip + int2(0, -1), p.width, p.height, p.wallY)).x;
+    float pb = pR.read(edgeCoord(ip + int2(0, 1), p.width, p.height, p.wallY)).x;
     float div = divR.read(gid).x;
     float result = (pl + pr + pt + pb - div) * 0.25f;
 
@@ -246,12 +283,13 @@ kernel void fluidProject(texture2d<float, access::read> velR [[texture(0)]],
     if (gid.x >= p.width || gid.y >= p.height) return;
 
     int2 ip = int2(gid);
-    float pl = pR.read(wrapCoord(ip + int2(-1, 0), p.width, p.height)).x;
-    float pr = pR.read(wrapCoord(ip + int2(1, 0), p.width, p.height)).x;
-    float pt = pR.read(wrapCoord(ip + int2(0, -1), p.width, p.height)).x;
-    float pb = pR.read(wrapCoord(ip + int2(0, 1), p.width, p.height)).x;
+    float pl = pR.read(edgeCoord(ip + int2(-1, 0), p.width, p.height, p.wallY)).x;
+    float pr = pR.read(edgeCoord(ip + int2(1, 0), p.width, p.height, p.wallY)).x;
+    float pt = pR.read(edgeCoord(ip + int2(0, -1), p.width, p.height, p.wallY)).x;
+    float pb = pR.read(edgeCoord(ip + int2(0, 1), p.width, p.height, p.wallY)).x;
     float2 grad = 0.5f * float2(pr - pl, pb - pt);
     float2 vel = velR.read(gid).xy - grad;
+    if (p.wallY != 0u && (gid.y == 0u || gid.y == p.height - 1u)) vel.y = 0.0f; // no flow through floor/ceiling
 
     velW.write(float4(vel, 0.0f, 0.0f), gid);
 }
@@ -269,7 +307,7 @@ kernel void fluidAdvectDye(texture2d<float, access::sample> dyeR [[texture(0)]],
     float2 pos = float2(gid) + 0.5f;
     float w = float(p.width), h = float(p.height);
     float2 vel = velR.read(gid).xy; // backtrace vector at this exact texel
-    float2 prev = pos - vel * p.dt;
+    float2 prev = edgePos(pos - vel * p.dt, h, p.wallY);
     float4 dye = sampleFieldWrap4(dyeR, prev, w, h);
     dye.rgb *= exp(-p.dyeDissipation * p.dt);
 
@@ -278,7 +316,11 @@ kernel void fluidAdvectDye(texture2d<float, access::sample> dyeR [[texture(0)]],
     float2 impulsePos = float2(rand01(uint2(cycle, 0u), 9001u, p.seed),
                                rand01(uint2(cycle, 1u), 9002u, p.seed)) * world;
     float2 d = pos - impulsePos;
-    d -= world * round(d / world);
+    if (p.wallY == 0u) {
+        d -= world * round(d / world);
+    } else {
+        d.x -= world.x * round(d.x / world.x);
+    }
     float r2 = dot(d, d);
     float R = max(p.impulseRadius, 1.0f);
     float falloff = exp(-r2 / (R * R));
