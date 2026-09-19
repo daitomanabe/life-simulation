@@ -242,10 +242,29 @@ kernel void slimeTrailUpdate(texture2d<float, access::read> trailIn [[texture(0)
 // ---- Beads: every beadStride-th agent drawn as a small lit sphere straight
 // onto the module's output layer (after colorMap/relief). They ride the
 // agents, so they stream along the bodies and drift alone through the dark.
-// One thread per bead, ~(2r)^2 px each — tens of thousands of beads cost
-// nothing next to the full-screen passes. Overlapping beads race on the
-// write; both write near-identical bright values, so it is not visible.
-// Matches life::SlimeMoldModule::BeadParams (scalar-packed).
+// Beads cluster densely on organism heads and overlap constantly there, so a
+// single read-modify-write kernel (one thread per bead, racing directly on
+// the output texture) is order-dependent — different overlap orders produce
+// different final pixels, which is what actually made room-b-sculpt.json
+// non-deterministic run to run at scale (not the Fluid<->Slime coupling;
+// that only mattered because it made beads overlap more). Fixed with a
+// three-pass claim/draw/release trio sharing ONE atomic_uint width*height
+// buffer (the SAME one showAgents/strayGain use, via
+// ParticleSplatPass::ensureDensity — SlimeMoldModule::encode leaves it
+// all-zero again before either of those runs their own accumulate):
+//   1. slimeBeadsClaim  — every covered pixel keeps the MAX of a per-bead
+//      key (edge coverage, then sphere normal z, then bead id) via a CAS
+//      loop — deterministic regardless of thread scheduling.
+//   2. slimeBeadsDraw   — each bead re-checks the key; only the pixel's
+//      final winner writes (exactly one writer per pixel -> race-free).
+//   3. slimeBeadsRelease — every covered pixel is reset to 0 (all writers
+//      store the same value, so this is race-free too).
+// Only 16 bits of the key identify the bead (SlimeMoldModule::encode clamps
+// the bead count to 65536, raising the effective stride if needed), so all
+// three kernels dispatch1D over BEAD count, not agent count. Geometry/
+// shading is factored into slimeBead*() helpers so the three kernels can't
+// drift apart. Matches life::SlimeMoldModule::BeadParams (scalar-packed,
+// unchanged).
 struct SlimeBeadParams {
     uint agentCount;
     uint stride;
@@ -263,40 +282,141 @@ struct SlimeBeadParams {
     float edgeFade;    // px: same floor/ceiling fade as the relief, so beads don't line the edges
 };
 
-kernel void slimeBeads(device const float2* positions [[buffer(0)]],
-                       texture2d<float, access::read_write> out [[texture(0)]],
-                       constant SlimeBeadParams& p [[buffer(1)]],
-                       uint id [[thread_position_in_grid]]) {
+// Per-bead center + jittered radius + floor/ceiling fade. Returns false when
+// the bead is fully faded out (skip it entirely, in all three passes).
+static bool slimeBeadGeometry(uint agent, device const float2* positions,
+                              constant SlimeBeadParams& p,
+                              thread float2& c, thread float& r, thread float& fade) {
+    c = positions[agent];
+    r = p.radius * (0.5f + float(pcg_hash(agent ^ 0x42454144u) >> 8) * (1.0f / 16777216.0f));
+    fade = 1.0f;
+    if (p.edgeFade > 0.0f) {
+        fade = smoothstep(0.0f, p.edgeFade, min(c.y, float(p.height) - c.y));
+        if (fade <= 0.0f) return false;
+    }
+    return true;
+}
+
+// Per-pixel coverage test against one bead's sphere + the ~1px soft rim
+// weight (edge, already including the floor/ceiling fade). False means the
+// pixel is outside the bead (or the rim is too faint to matter — matches
+// the >=1/255 floor slimeBeadsClaim/Draw/Release all skip below).
+static bool slimeBeadCoverage(int2 q, float2 c, float r, float fade,
+                              thread float2& nxy, thread float& d2, thread float& edge) {
+    float2 d = (float2(q) + 0.5f - c) / r;
+    d2 = dot(d, d);
+    if (d2 >= 1.0f) return false;
+    nxy = d;
+    edge = saturate((1.0f - sqrt(d2)) * r) * fade;
+    return uint(edge * 255.0f) >= 1u;
+}
+
+// Blinn-Phong shade for a pixel already known to be covered (nxy/d2 from
+// slimeBeadCoverage above).
+static float slimeBeadShade(float2 nxy, float d2, constant SlimeBeadParams& p) {
+    float3 n = float3(nxy, sqrt(1.0f - d2));
+    float3 L = float3(p.lightX, p.lightY, p.lightZ);
+    float3 H = normalize(L + float3(0.0f, 0.0f, 1.0f));
+    return p.ambient + p.diffuse * max(dot(n, L), 0.0f) +
+           p.specular * pow(max(dot(n, H), 0.0f), p.shininess);
+}
+
+// Shared iteration bounds: every pixel a bead's sphere could possibly cover.
+static void slimeBeadBounds(float2 c, float r, thread int2& base, thread int& ir) {
+    ir = int(ceil(r)) + 1;
+    base = int2(floor(c));
+}
+
+kernel void slimeBeadsClaim(device const float2* positions [[buffer(0)]],
+                            device atomic_uint* claim [[buffer(1)]],
+                            constant SlimeBeadParams& p [[buffer(2)]],
+                            uint id [[thread_position_in_grid]]) {
     uint agent = id * p.stride;
     if (agent >= p.agentCount) return;
 
-    float2 c = positions[agent];
-    float r = p.radius * (0.5f + float(pcg_hash(agent ^ 0x42454144u) >> 8) * (1.0f / 16777216.0f));
-    float3 L = float3(p.lightX, p.lightY, p.lightZ);
-    float3 H = normalize(L + float3(0.0f, 0.0f, 1.0f));
-    float3 tint = float3(p.tintR, p.tintG, p.tintB) * p.exposure;
-    float fade = 1.0f;
-    if (p.edgeFade > 0.0f) {
-        fade = smoothstep(0.0f, p.edgeFade, min(c.y, float(p.height) - c.y));
-        if (fade <= 0.0f) return;
-    }
+    float2 c; float r; float fade;
+    if (!slimeBeadGeometry(agent, positions, p, c, r, fade)) return;
 
-    int ir = int(ceil(r)) + 1;
-    int2 base = int2(floor(c));
+    int2 base; int ir;
+    slimeBeadBounds(c, r, base, ir);
     for (int dy = -ir; dy <= ir; ++dy) {
         for (int dx = -ir; dx <= ir; ++dx) {
             int2 q = base + int2(dx, dy);
             if (p.wallY != 0u && (q.y < 0 || q.y >= int(p.height))) continue;
-            float2 d = (float2(q) + 0.5f - c) / r;
-            float d2 = dot(d, d);
-            if (d2 >= 1.0f) continue;
-            float3 n = float3(d, sqrt(1.0f - d2));
-            float v = p.ambient + p.diffuse * max(dot(n, L), 0.0f) +
-                      p.specular * pow(max(dot(n, H), 0.0f), p.shininess);
-            float edge = saturate((1.0f - sqrt(d2)) * r) * fade; // ~1 px soft rim
+            float2 nxy; float d2; float edge;
+            if (!slimeBeadCoverage(q, c, r, fade, nxy, d2, edge)) continue;
+
+            uint e = uint(edge * 255.0f);
+            uint nz = uint(saturate(sqrt(1.0f - d2)) * 255.0f);
+            uint key = (e << 24) | (nz << 16) | (id & 0xFFFFu);
+
             uint2 w = wrapCoord(q, p.width, p.height);
+            uint idx = w.y * p.width + w.x;
+            uint old = atomic_load_explicit(&claim[idx], memory_order_relaxed);
+            while (key > old &&
+                   !atomic_compare_exchange_weak_explicit(&claim[idx], &old, key,
+                                                          memory_order_relaxed,
+                                                          memory_order_relaxed)) {
+            }
+        }
+    }
+}
+
+kernel void slimeBeadsDraw(device const float2* positions [[buffer(0)]],
+                           device atomic_uint* claim [[buffer(1)]],
+                           constant SlimeBeadParams& p [[buffer(2)]],
+                           texture2d<float, access::read_write> out [[texture(0)]],
+                           uint id [[thread_position_in_grid]]) {
+    uint agent = id * p.stride;
+    if (agent >= p.agentCount) return;
+
+    float2 c; float r; float fade;
+    if (!slimeBeadGeometry(agent, positions, p, c, r, fade)) return;
+
+    float3 tint = float3(p.tintR, p.tintG, p.tintB) * p.exposure;
+    int2 base; int ir;
+    slimeBeadBounds(c, r, base, ir);
+    for (int dy = -ir; dy <= ir; ++dy) {
+        for (int dx = -ir; dx <= ir; ++dx) {
+            int2 q = base + int2(dx, dy);
+            if (p.wallY != 0u && (q.y < 0 || q.y >= int(p.height))) continue;
+            float2 nxy; float d2; float edge;
+            if (!slimeBeadCoverage(q, c, r, fade, nxy, d2, edge)) continue;
+
+            uint2 w = wrapCoord(q, p.width, p.height);
+            uint idx = w.y * p.width + w.x;
+            uint key = atomic_load_explicit(&claim[idx], memory_order_relaxed);
+            if ((key & 0xFFFFu) != (id & 0xFFFFu)) continue; // another bead won this pixel
+
+            float v = slimeBeadShade(nxy, d2, p);
             float4 cur = out.read(w);
             out.write(float4(mix(cur.rgb, v * tint, edge), max(cur.a, edge)), w);
+        }
+    }
+}
+
+kernel void slimeBeadsRelease(device const float2* positions [[buffer(0)]],
+                              device atomic_uint* claim [[buffer(1)]],
+                              constant SlimeBeadParams& p [[buffer(2)]],
+                              uint id [[thread_position_in_grid]]) {
+    uint agent = id * p.stride;
+    if (agent >= p.agentCount) return;
+
+    float2 c; float r; float fade;
+    if (!slimeBeadGeometry(agent, positions, p, c, r, fade)) return;
+
+    int2 base; int ir;
+    slimeBeadBounds(c, r, base, ir);
+    for (int dy = -ir; dy <= ir; ++dy) {
+        for (int dx = -ir; dx <= ir; ++dx) {
+            int2 q = base + int2(dx, dy);
+            if (p.wallY != 0u && (q.y < 0 || q.y >= int(p.height))) continue;
+            float2 nxy; float d2; float edge;
+            if (!slimeBeadCoverage(q, c, r, fade, nxy, d2, edge)) continue;
+
+            uint2 w = wrapCoord(q, p.width, p.height);
+            uint idx = w.y * p.width + w.x;
+            atomic_store_explicit(&claim[idx], 0u, memory_order_relaxed); // every writer stores 0 -> race-free
         }
     }
 }

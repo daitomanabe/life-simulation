@@ -105,7 +105,7 @@ void SlimeMoldModule::setup(SimulationContext& ctx) {
 void SlimeMoldModule::reset(uint32_t seed) {
     seed_ = deriveSeed(seed, 0x534C4D31); // "SLM1"
     needsInit_ = true;
-    strayNeedsClear_ = true;
+    sharedDensityNeedsClear_ = true;
 }
 
 void SlimeMoldModule::updateCPU(const AudioFeatureState& audio) { audio_ = audio; }
@@ -192,10 +192,44 @@ void SlimeMoldModule::encode(SimulationContext& ctx) {
     colorMap_.encode(*ctx.graph, instanceName_ + ".colorMap", trail_.read(), output_,
                      width_, height_);
 
-    // Beads: every beadStride-th agent as a small lit sphere, under the same
-    // light as the relief so the two read as one material.
+    // Beads (below) and strayGain (further below) share ONE atomic_uint
+    // width*height buffer (ParticleSplatPass::ensureDensity — the same one
+    // showAgents uses) instead of each allocating their own; it must be
+    // all-zero before either touches it, so the one-time clear lives here,
+    // ahead of both.
     uint32_t beadStride = uint32_t(std::max(0.0f, param(ctx, "beadStride", 0.0f)));
+    float strayGain = param(ctx, "strayGain", 0.0f);
+    BufferHandle sharedDensity;
+    if (beadStride > 0u || strayGain > 0.0f) {
+        sharedDensity =
+            splat_.ensureDensity(*ctx.graph, instanceName_ + ".splat", width_, height_);
+        if (sharedDensityNeedsClear_) {
+            ctx.graph->pass(instanceName_ + ".sharedDensityClear")
+                .pipeline("slimeClearDeposit")
+                .buffer(0, sharedDensity)
+                .uniforms(1, gpuParams_)
+                .dispatch1D(width_ * height_);
+            sharedDensityNeedsClear_ = false;
+        }
+    }
+
+    // Beads: every beadStride-th agent as a small lit sphere, under the same
+    // light as the relief so the two read as one material. Race-free
+    // claim/draw/release trio (see Shaders/Particle/SlimeMold.metal) — beads
+    // cluster on organism heads and overlap constantly, so a naive
+    // read-modify-write there was order-dependent (the actual cause of
+    // room-b-sculpt.json's run-to-run non-determinism at scale).
     if (beadStride > 0u) {
+        // slimeBeadsClaim/Draw/Release pack the owning bead's thread id into
+        // 16 bits of the overlap-resolution key, so at most 65536 beads can
+        // be told apart; raise the effective stride (fewer beads) rather
+        // than risk two unrelated beads colliding on the same id.
+        uint32_t beadCount = (gpuParams_.agentCount + beadStride - 1u) / beadStride;
+        if (beadCount > 65536u) {
+            beadStride = (gpuParams_.agentCount + 65535u) / 65536u;
+            beadCount = (gpuParams_.agentCount + beadStride - 1u) / beadStride;
+        }
+
         BeadParams bp;
         bp.agentCount = gpuParams_.agentCount;
         bp.stride = beadStride;
@@ -212,34 +246,37 @@ void SlimeMoldModule::encode(SimulationContext& ctx) {
             bp.edgeFade = r.edgeFade;
         }
         bp.exposure *= param(ctx, "beadGain", 1.0f);
-        ctx.graph->pass(instanceName_ + ".beads")
-            .pipeline("slimeBeads")
+
+        ctx.graph->pass(instanceName_ + ".beadsClaim")
+            .pipeline("slimeBeadsClaim")
             .buffer(0, set_.positions())
+            .buffer(1, sharedDensity)
+            .uniforms(2, bp)
+            .dispatch1D(beadCount);
+
+        ctx.graph->pass(instanceName_ + ".beadsDraw")
+            .pipeline("slimeBeadsDraw")
+            .buffer(0, set_.positions())
+            .buffer(1, sharedDensity)
+            .uniforms(2, bp)
             .write(0, output_)
-            .uniforms(1, bp)
-            .dispatch1D((gpuParams_.agentCount + beadStride - 1u) / beadStride);
+            .dispatch1D(beadCount);
+
+        ctx.graph->pass(instanceName_ + ".beadsRelease")
+            .pipeline("slimeBeadsRelease")
+            .buffer(0, set_.positions())
+            .buffer(1, sharedDensity)
+            .uniforms(2, bp)
+            .dispatch1D(beadCount);
     }
 
     // strayGain: a separate, soft-saturated overlay of ALL agents' raw
     // density (unlike showAgents, always full-population, never gated by
     // the showAgents knob), masked to hide the already-bright organism
-    // interiors and show only agents wandering in the dark. Reuses splat_'s
-    // density buffer (shared with showAgents below) instead of allocating a
-    // second width*height atomic_uint buffer.
-    float strayGain = param(ctx, "strayGain", 0.0f);
+    // interiors and show only agents wandering in the dark. Reuses the same
+    // sharedDensity buffer as beads above (already cleared / left at zero
+    // by whichever of the two ran first this frame).
     if (strayGain > 0.0f) {
-        BufferHandle strayDensity =
-            splat_.ensureDensity(*ctx.graph, instanceName_ + ".splat", width_, height_);
-
-        if (strayNeedsClear_) {
-            ctx.graph->pass(instanceName_ + ".strayClear")
-                .pipeline("slimeClearDeposit")
-                .buffer(0, strayDensity)
-                .uniforms(1, gpuParams_)
-                .dispatch1D(width_ * height_);
-            strayNeedsClear_ = false;
-        }
-
         SplatParams accP{};
         accP.particleCount = gpuParams_.agentCount;
         accP.width = width_;
@@ -248,7 +285,7 @@ void SlimeMoldModule::encode(SimulationContext& ctx) {
         ctx.graph->pass(instanceName_ + ".strayAccumulate")
             .pipeline("splatAccumulate")
             .buffer(0, set_.positions())
-            .buffer(1, strayDensity)
+            .buffer(1, sharedDensity)
             .uniforms(2, accP)
             .dispatch1D(gpuParams_.agentCount);
 
@@ -267,7 +304,7 @@ void SlimeMoldModule::encode(SimulationContext& ctx) {
         }
         ctx.graph->pass(instanceName_ + ".strayResolve")
             .pipeline("strayResolve")
-            .buffer(0, strayDensity)
+            .buffer(0, sharedDensity)
             .read(0, trail_.read())
             .write(1, output_)
             .uniforms(1, sp2)

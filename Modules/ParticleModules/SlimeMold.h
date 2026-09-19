@@ -122,7 +122,7 @@ private:
     AudioFeatureState audio_{};
     uint32_t seed_ = 0;
     bool needsInit_ = true;
-    bool strayNeedsClear_ = true; // one-time zero of splat_'s density buffer for the strayGain path
+    bool sharedDensityNeedsClear_ = true; // one-time zero of splat_'s density buffer (beads claim + strayGain)
     uint32_t width_ = 0;
     uint32_t height_ = 0;
     TextureHandle attractorInput_;
