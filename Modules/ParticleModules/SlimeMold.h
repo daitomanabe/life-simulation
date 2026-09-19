@@ -86,6 +86,18 @@ private:
         uint32_t wallY = 0;           // strip world: floor/ceiling are walls, x still wraps
     };
 
+    // Mirrors SlimeBeadParams in Shaders/Particle/SlimeMold.metal.
+    struct BeadParams {
+        uint32_t agentCount = 0, stride = 0, width = 0, height = 0, wallY = 0;
+        float radius = 5.0f;
+        float lightX = -0.55f, lightY = -0.60f, lightZ = 0.58f;
+        float ambient = 0.05f, diffuse = 0.9f, specular = 1.0f, shininess = 30.0f;
+        float tintR = 0.93f, tintG = 0.97f, tintB = 1.0f;
+        float exposure = 1.0f;
+        float edgeFade = 0.0f;
+    };
+    static_assert(sizeof(BeadParams) == 18 * 4, "BeadParams must stay scalar-packed to match MSL");
+
     ParticleSet2D set_;
     Field2D trail_;
     BufferHandle deposit_;

@@ -238,3 +238,65 @@ kernel void slimeTrailUpdate(texture2d<float, access::read> trailIn [[texture(0)
 
     trailOut.write(float4(v, 0.0f, 0.0f, 0.0f), gid);
 }
+
+// ---- Beads: every beadStride-th agent drawn as a small lit sphere straight
+// onto the module's output layer (after colorMap/relief). They ride the
+// agents, so they stream along the bodies and drift alone through the dark.
+// One thread per bead, ~(2r)^2 px each — tens of thousands of beads cost
+// nothing next to the full-screen passes. Overlapping beads race on the
+// write; both write near-identical bright values, so it is not visible.
+// Matches life::SlimeMoldModule::BeadParams (scalar-packed).
+struct SlimeBeadParams {
+    uint agentCount;
+    uint stride;
+    uint width;
+    uint height;
+    uint wallY;
+    float radius;      // px; per-bead size is 0.5x..1.5x of this
+    float lightX, lightY, lightZ;
+    float ambient;
+    float diffuse;
+    float specular;
+    float shininess;
+    float tintR, tintG, tintB;
+    float exposure;
+    float edgeFade;    // px: same floor/ceiling fade as the relief, so beads don't line the edges
+};
+
+kernel void slimeBeads(device const float2* positions [[buffer(0)]],
+                       texture2d<float, access::read_write> out [[texture(0)]],
+                       constant SlimeBeadParams& p [[buffer(1)]],
+                       uint id [[thread_position_in_grid]]) {
+    uint agent = id * p.stride;
+    if (agent >= p.agentCount) return;
+
+    float2 c = positions[agent];
+    float r = p.radius * (0.5f + float(pcg_hash(agent ^ 0x42454144u) >> 8) * (1.0f / 16777216.0f));
+    float3 L = float3(p.lightX, p.lightY, p.lightZ);
+    float3 H = normalize(L + float3(0.0f, 0.0f, 1.0f));
+    float3 tint = float3(p.tintR, p.tintG, p.tintB) * p.exposure;
+    float fade = 1.0f;
+    if (p.edgeFade > 0.0f) {
+        fade = smoothstep(0.0f, p.edgeFade, min(c.y, float(p.height) - c.y));
+        if (fade <= 0.0f) return;
+    }
+
+    int ir = int(ceil(r)) + 1;
+    int2 base = int2(floor(c));
+    for (int dy = -ir; dy <= ir; ++dy) {
+        for (int dx = -ir; dx <= ir; ++dx) {
+            int2 q = base + int2(dx, dy);
+            if (p.wallY != 0u && (q.y < 0 || q.y >= int(p.height))) continue;
+            float2 d = (float2(q) + 0.5f - c) / r;
+            float d2 = dot(d, d);
+            if (d2 >= 1.0f) continue;
+            float3 n = float3(d, sqrt(1.0f - d2));
+            float v = p.ambient + p.diffuse * max(dot(n, L), 0.0f) +
+                      p.specular * pow(max(dot(n, H), 0.0f), p.shininess);
+            float edge = saturate((1.0f - sqrt(d2)) * r) * fade; // ~1 px soft rim
+            uint2 w = wrapCoord(q, p.width, p.height);
+            float4 cur = out.read(w);
+            out.write(float4(mix(cur.rgb, v * tint, edge), max(cur.a, edge)), w);
+        }
+    }
+}

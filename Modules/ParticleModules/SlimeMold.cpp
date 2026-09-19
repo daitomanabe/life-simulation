@@ -175,6 +175,34 @@ void SlimeMoldModule::encode(SimulationContext& ctx) {
     colorMap_.encode(*ctx.graph, instanceName_ + ".colorMap", trail_.read(), output_,
                      width_, height_);
 
+    // Beads: every beadStride-th agent as a small lit sphere, under the same
+    // light as the relief so the two read as one material.
+    uint32_t beadStride = uint32_t(std::max(0.0f, param(ctx, "beadStride", 0.0f)));
+    if (beadStride > 0u) {
+        BeadParams bp;
+        bp.agentCount = gpuParams_.agentCount;
+        bp.stride = beadStride;
+        bp.width = width_;
+        bp.height = height_;
+        bp.wallY = gpuParams_.wallY;
+        bp.radius = param(ctx, "beadRadius", 5.0f);
+        if (colorMap_.reliefEnabled) {
+            const auto& r = colorMap_.relief;
+            bp.lightX = r.lightX; bp.lightY = r.lightY; bp.lightZ = r.lightZ;
+            bp.shininess = r.shininess;
+            bp.tintR = r.tintR; bp.tintG = r.tintG; bp.tintB = r.tintB;
+            bp.exposure = r.exposure;
+            bp.edgeFade = r.edgeFade;
+        }
+        bp.exposure *= param(ctx, "beadGain", 1.0f);
+        ctx.graph->pass(instanceName_ + ".beads")
+            .pipeline("slimeBeads")
+            .buffer(0, set_.positions())
+            .write(0, output_)
+            .uniforms(1, bp)
+            .dispatch1D((gpuParams_.agentCount + beadStride - 1u) / beadStride);
+    }
+
     float showAgents = param(ctx, "showAgents", 0.0f);
     if (showAgents > 0.0f) {
         ParticleSplatPass::Params sp;
