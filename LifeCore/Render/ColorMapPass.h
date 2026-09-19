@@ -23,6 +23,36 @@ struct ColorMapParams {
     uint32_t channel = 1; // which source channel drives the palette (RD: V)
 };
 
+// Mirrors ReliefParams in Shaders/Render/Relief.metal. An alternative to the
+// palette: the field is shaded as a lit height field on black.
+struct ReliefParams {
+    uint32_t width = 0;
+    uint32_t height = 0;
+    uint32_t channel = 0;
+    uint32_t frame = 0;
+    float inputScale = 0.25f;
+    float heightScale = 24.0f;
+    float lightX = -0.55f, lightY = -0.60f, lightZ = 0.58f; // normalized in configure()
+    float ambient = 0.06f;
+    float diffuse = 0.85f;
+    float specular = 0.9f;
+    float shininess = 28.0f;
+    float rim = 0.35f;
+    float contourFreq = 0.0f;
+    float contourGain = 0.6f;
+    float contourWidth = 1.2f;
+    uint32_t shadowSteps = 12;
+    float shadowLength = 40.0f;
+    float shadowStrength = 0.85f;
+    float tintR = 0.93f, tintG = 0.97f, tintB = 1.0f;
+    float grain = 0.0f;
+    float exposure = 1.0f;
+    float logCurve = 0.0f;
+    float logRange = 200.0f;
+    float edgeFade = 0.0f;
+};
+static_assert(sizeof(ReliefParams) == 28 * 4, "ReliefParams must stay scalar-packed to match MSL");
+
 class ColorMapPass {
 public:
     // Reads palette overrides from a module's JSON params block, e.g.
@@ -48,6 +78,12 @@ public:
                       uint32_t dstWidth, uint32_t dstHeight);
 
     ColorMapParams params;
+
+    // Set by a "relief": { ... } block in the module's params. When on,
+    // encode() shades with reliefShadeField instead of the palette.
+    // encodeScaled() (Lenia at a separate sim resolution) still uses the palette.
+    bool reliefEnabled = false;
+    ReliefParams relief;
 };
 
 } // namespace life

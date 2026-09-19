@@ -1,6 +1,8 @@
 // LifeCore/Render/ColorMapPass.cpp
 #include "LifeCore/Render/ColorMapPass.h"
 
+#include <cmath>
+
 namespace life {
 
 namespace {
@@ -14,6 +16,43 @@ struct ColorMapScaledParams {
 } // namespace
 
 void ColorMapPass::configure(const nlohmann::json& moduleParams) {
+    if (moduleParams.contains("relief")) {
+        const auto& r = moduleParams["relief"];
+        reliefEnabled = true;
+        relief.channel = r.value("channel", params.channel);
+        relief.inputScale = r.value("inputScale", relief.inputScale);
+        relief.heightScale = r.value("heightScale", relief.heightScale);
+        if (r.contains("light") && r["light"].is_array() && r["light"].size() >= 3) {
+            relief.lightX = r["light"][0].get<float>();
+            relief.lightY = r["light"][1].get<float>();
+            relief.lightZ = r["light"][2].get<float>();
+        }
+        float len = std::sqrt(relief.lightX * relief.lightX + relief.lightY * relief.lightY +
+                              relief.lightZ * relief.lightZ);
+        if (len > 1e-6f) { relief.lightX /= len; relief.lightY /= len; relief.lightZ /= len; }
+        relief.ambient = r.value("ambient", relief.ambient);
+        relief.diffuse = r.value("diffuse", relief.diffuse);
+        relief.specular = r.value("specular", relief.specular);
+        relief.shininess = r.value("shininess", relief.shininess);
+        relief.rim = r.value("rim", relief.rim);
+        relief.contourFreq = r.value("contourFreq", relief.contourFreq);
+        relief.contourGain = r.value("contourGain", relief.contourGain);
+        relief.contourWidth = r.value("contourWidth", relief.contourWidth);
+        relief.shadowSteps = r.value("shadowSteps", relief.shadowSteps);
+        relief.shadowLength = r.value("shadowLength", relief.shadowLength);
+        relief.shadowStrength = r.value("shadowStrength", relief.shadowStrength);
+        if (r.contains("tint") && r["tint"].is_array() && r["tint"].size() >= 3) {
+            relief.tintR = r["tint"][0].get<float>();
+            relief.tintG = r["tint"][1].get<float>();
+            relief.tintB = r["tint"][2].get<float>();
+        }
+        relief.grain = r.value("grain", relief.grain);
+        relief.exposure = r.value("exposure", relief.exposure);
+        relief.logCurve = r.value("logCurve", relief.logCurve);
+        relief.logRange = r.value("logRange", relief.logRange);
+        relief.edgeFade = r.value("edgeFade", relief.edgeFade);
+    }
+
     if (!moduleParams.contains("colorMap")) return;
     const auto& cm = moduleParams["colorMap"];
 
@@ -50,6 +89,18 @@ void ColorMapPass::configure(const nlohmann::json& moduleParams) {
 void ColorMapPass::encode(CommandGraph& graph, const std::string& label,
                           TextureHandle field, TextureHandle rgbaOut, uint32_t width,
                           uint32_t height) {
+    if (reliefEnabled) {
+        relief.width = width;
+        relief.height = height;
+        relief.frame++; // grain reseed; once per encode, so still deterministic
+        graph.pass(label)
+            .pipeline("reliefShadeField")
+            .read(0, field)
+            .write(1, rgbaOut)
+            .uniforms(0, relief)
+            .dispatch2D(width, height);
+        return;
+    }
     graph.pass(label)
         .pipeline("colorMapField")
         .read(0, field)
