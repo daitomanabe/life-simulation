@@ -170,6 +170,7 @@ int main(int argc, char** argv) {
     int width = -1, height = -1;
     double fps = 30.0;
     uint32_t frames = 300;
+    uint32_t warmup = 0;
     uint32_t substeps = 1;
     int64_t seed = -1;
     float exposure = 1.0f;
@@ -186,6 +187,9 @@ int main(int argc, char** argv) {
     app.add_option("--height", height, "Override scene height");
     app.add_option("--fps", fps, "Simulation frame rate (fixed dt = 1/fps)");
     app.add_option("--frames", frames, "Number of frames to render");
+    app.add_option("--warmup", warmup,
+                   "Simulate this many of --frames first without writing anything (PNG/EXR/movie/raw). "
+                   "For scenes that need time to develop; frame numbering is unchanged.");
     app.add_option("--substeps", substeps, "Simulation substeps per frame");
     app.add_option("--seed", seed, "Override scene seed");
     app.add_option("--audio", audioCapture, "AudioFeatureState capture (.jsonl) to replay");
@@ -359,11 +363,12 @@ int main(int argc, char** argv) {
 
         std::string pngPath = app::frameFilename(outputDir, "frame", i, "png");
         std::string exrPath = app::frameFilename(outputDir, "frame", i, "exr");
-        bool needPNG = writePNG && !(resume && fs::exists(pngPath));
-        bool needEXR = writeEXR && !(resume && fs::exists(exrPath));
+        const bool out = i >= warmup;
+        bool needPNG = out && writePNG && !(resume && fs::exists(pngPath));
+        bool needEXR = out && writeEXR && !(resume && fs::exists(exrPath));
         // movie export needs a readback every frame even on frames where
         // PNG/EXR aren't being (re)written (spec §2).
-        bool needReadback = needPNG || needEXR || wantMovie || wantRaw;
+        bool needReadback = needPNG || needEXR || (out && (wantMovie || wantRaw));
 
         StepOptions opts;
         opts.readback = needReadback;
@@ -381,7 +386,7 @@ int main(int argc, char** argv) {
             fprintf(stderr, "[life] frame %u: %s\n", i, err.c_str());
         if (needEXR && !runner->dumpEXR(exrPath, err))
             fprintf(stderr, "[life] frame %u: %s\n", i, err.c_str());
-        if (wantMovie || wantRaw) {
+        if (out && (wantMovie || wantRaw)) {
             // 1 フレームにつき readback は 1 回だけ。--movie と --raw を同時に
             // 指定しても GPU→CPU コピーは重複しない。
             std::string ferr;
