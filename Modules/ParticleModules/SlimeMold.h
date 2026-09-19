@@ -98,6 +98,20 @@ private:
     };
     static_assert(sizeof(BeadParams) == 18 * 4, "BeadParams must stay scalar-packed to match MSL");
 
+    // Mirrors StrayResolveParams in Shaders/Particle/SlimeMold.metal.
+    struct StrayResolveParams {
+        uint32_t width = 0, height = 0;
+        float strayGain = 0.0f;
+        float strayDensity = 1.5f;
+        float strayMaskLo = 4.0f;
+        float strayMaskHi = 14.0f;
+        float tintR = 1.0f, tintG = 1.0f, tintB = 1.0f;
+        float exposure = 1.0f;
+        float edgeFade = 0.0f;
+    };
+    static_assert(sizeof(StrayResolveParams) == 11 * 4,
+                  "StrayResolveParams must stay scalar-packed to match MSL");
+
     ParticleSet2D set_;
     Field2D trail_;
     BufferHandle deposit_;
@@ -108,6 +122,7 @@ private:
     AudioFeatureState audio_{};
     uint32_t seed_ = 0;
     bool needsInit_ = true;
+    bool strayNeedsClear_ = true; // one-time zero of splat_'s density buffer for the strayGain path
     uint32_t width_ = 0;
     uint32_t height_ = 0;
     TextureHandle attractorInput_;

@@ -11,6 +11,7 @@
 #include "Modules/ParticleModules/Boids.h"
 #include "Modules/ParticleModules/ParticleLife.h"
 #include "Modules/ParticleModules/SlimeMold.h"
+#include "Modules/ParticleModules/Tracers.h"
 
 namespace life::modules {
 
@@ -28,6 +29,7 @@ void registerBuiltinModules() {
                    [] { return std::make_unique<ParticleLifeModule>(); });
     f.registerType("Boids", [] { return std::make_unique<BoidsModule>(); });
     f.registerType("Fluid", [] { return std::make_unique<FluidModule>(); });
+    f.registerType("Tracers", [] { return std::make_unique<TracersModule>(); });
 }
 
 } // namespace life::modules

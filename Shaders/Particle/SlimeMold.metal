@@ -300,3 +300,56 @@ kernel void slimeBeads(device const float2* positions [[buffer(0)]],
         }
     }
 }
+
+// ---- Strays: a separate, soft-saturated overlay of ALL agents' raw
+// density (not just showAgents' gated splat), masked to show only where the
+// trail itself is faint — i.e. lone agents wandering in the dark, not the
+// thousands-per-pixel interior of an organism (showAgents blows that out to
+// white; this stays dark there via the mask). The count itself comes from
+// the generic splatAccumulate kernel (ParticleSplat.metal) accumulating
+// into the SAME density buffer showAgents' ParticleSplatPass already owns
+// (SlimeMoldModule::encode reuses it via ParticleSplatPass::ensureDensity)
+// — this is only the resolve. Matches life::SlimeMoldModule::
+// StrayResolveParams (scalar-packed).
+struct StrayResolveParams {
+    uint width;
+    uint height;
+    float strayGain;
+    float strayDensity;
+    float strayMaskLo;
+    float strayMaskHi;
+    float tintR, tintG, tintB;
+    float exposure;
+    float edgeFade;
+};
+
+kernel void strayResolve(device atomic_uint* density [[buffer(0)]],
+                         texture2d<float, access::read> trail [[texture(0)]],
+                         texture2d<float, access::read_write> out [[texture(1)]],
+                         constant StrayResolveParams& p [[buffer(1)]],
+                         uint2 gid [[thread_position_in_grid]]) {
+    if (gid.x >= p.width || gid.y >= p.height) return;
+
+    uint idx = gid.y * p.width + gid.x;
+    float d = float(atomic_load_explicit(&density[idx], memory_order_relaxed)) / 256.0f;
+    atomic_store_explicit(&density[idx], 0u, memory_order_relaxed); // self cell only, race-free
+
+    float v = p.strayGain * (1.0f - exp(-d * p.strayDensity));
+
+    // Every agent deposits on its own pixel (~1-3 for a lone agent, tens to
+    // hundreds inside organisms), so the mask thresholds the trail value
+    // itself rather than some derived agent count.
+    float trailValue = trail.read(gid).x;
+    float mask = 1.0f - smoothstep(p.strayMaskLo, p.strayMaskHi, trailValue);
+    v *= mask;
+
+    if (p.edgeFade > 0.0f) {
+        float fade = smoothstep(0.0f, p.edgeFade,
+                                min(float(gid.y), float(p.height - 1u) - float(gid.y)));
+        v *= fade;
+    }
+
+    float3 tint = float3(p.tintR, p.tintG, p.tintB) * p.exposure;
+    float4 cur = out.read(gid);
+    out.write(float4(cur.rgb + v * tint, cur.a), gid);
+}

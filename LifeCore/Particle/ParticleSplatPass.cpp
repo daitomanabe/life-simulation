@@ -17,10 +17,8 @@ struct SplatParams {
 };
 } // namespace
 
-void ParticleSplatPass::encode(CommandGraph& graph, const std::string& labelPrefix,
-                               BufferHandle positions, uint32_t count,
-                               TextureHandle target, uint32_t w, uint32_t h,
-                               const Params& p) {
+BufferHandle ParticleSplatPass::ensureDensity(CommandGraph& graph, const std::string& labelPrefix,
+                                              uint32_t w, uint32_t h) {
     if (!density_.valid() || densityWidth_ != w || densityHeight_ != h) {
         if (density_.valid()) graph.resources().release(density_);
         BufferDesc bd;
@@ -32,6 +30,14 @@ void ParticleSplatPass::encode(CommandGraph& graph, const std::string& labelPref
         densityHeight_ = h;
         needsClear_ = true;
     }
+    return density_;
+}
+
+void ParticleSplatPass::encode(CommandGraph& graph, const std::string& labelPrefix,
+                               BufferHandle positions, uint32_t count,
+                               TextureHandle target, uint32_t w, uint32_t h,
+                               const Params& p) {
+    ensureDensity(graph, labelPrefix, w, h);
 
     SplatParams sp{};
     sp.particleCount = count;

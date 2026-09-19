@@ -9,6 +9,22 @@
 
 namespace life {
 
+namespace {
+// Mirrors SplatParams in Shaders/Particle/ParticleSplat.metal — reused
+// directly (via the generic splatAccumulate kernel) for the strayGain
+// overlay's raw agent count, instead of a bespoke accumulate kernel.
+struct SplatParams {
+    uint32_t particleCount;
+    uint32_t width;
+    uint32_t height;
+    float weight;
+    float gainR;
+    float gainG;
+    float gainB;
+    float gain;
+};
+} // namespace
+
 void SlimeMoldModule::setup(SimulationContext& ctx) {
     width_ = ctx.width;
     height_ = ctx.height;
@@ -89,6 +105,7 @@ void SlimeMoldModule::setup(SimulationContext& ctx) {
 void SlimeMoldModule::reset(uint32_t seed) {
     seed_ = deriveSeed(seed, 0x534C4D31); // "SLM1"
     needsInit_ = true;
+    strayNeedsClear_ = true;
 }
 
 void SlimeMoldModule::updateCPU(const AudioFeatureState& audio) { audio_ = audio; }
@@ -201,6 +218,60 @@ void SlimeMoldModule::encode(SimulationContext& ctx) {
             .write(0, output_)
             .uniforms(1, bp)
             .dispatch1D((gpuParams_.agentCount + beadStride - 1u) / beadStride);
+    }
+
+    // strayGain: a separate, soft-saturated overlay of ALL agents' raw
+    // density (unlike showAgents, always full-population, never gated by
+    // the showAgents knob), masked to hide the already-bright organism
+    // interiors and show only agents wandering in the dark. Reuses splat_'s
+    // density buffer (shared with showAgents below) instead of allocating a
+    // second width*height atomic_uint buffer.
+    float strayGain = param(ctx, "strayGain", 0.0f);
+    if (strayGain > 0.0f) {
+        BufferHandle strayDensity =
+            splat_.ensureDensity(*ctx.graph, instanceName_ + ".splat", width_, height_);
+
+        if (strayNeedsClear_) {
+            ctx.graph->pass(instanceName_ + ".strayClear")
+                .pipeline("slimeClearDeposit")
+                .buffer(0, strayDensity)
+                .uniforms(1, gpuParams_)
+                .dispatch1D(width_ * height_);
+            strayNeedsClear_ = false;
+        }
+
+        SplatParams accP{};
+        accP.particleCount = gpuParams_.agentCount;
+        accP.width = width_;
+        accP.height = height_;
+        accP.weight = 1.0f; // raw agent count per pixel (d = count/256 in the resolve)
+        ctx.graph->pass(instanceName_ + ".strayAccumulate")
+            .pipeline("splatAccumulate")
+            .buffer(0, set_.positions())
+            .buffer(1, strayDensity)
+            .uniforms(2, accP)
+            .dispatch1D(gpuParams_.agentCount);
+
+        StrayResolveParams sp2;
+        sp2.width = width_;
+        sp2.height = height_;
+        sp2.strayGain = strayGain;
+        sp2.strayDensity = param(ctx, "strayDensity", 1.5f);
+        sp2.strayMaskLo = param(ctx, "strayMaskLo", 4.0f);
+        sp2.strayMaskHi = param(ctx, "strayMaskHi", 14.0f);
+        if (colorMap_.reliefEnabled) {
+            const auto& r = colorMap_.relief;
+            sp2.tintR = r.tintR; sp2.tintG = r.tintG; sp2.tintB = r.tintB;
+            sp2.exposure = r.exposure;
+            sp2.edgeFade = r.edgeFade;
+        }
+        ctx.graph->pass(instanceName_ + ".strayResolve")
+            .pipeline("strayResolve")
+            .buffer(0, strayDensity)
+            .read(0, trail_.read())
+            .write(1, output_)
+            .uniforms(1, sp2)
+            .dispatch2D(width_, height_);
     }
 
     float showAgents = param(ctx, "showAgents", 0.0f);

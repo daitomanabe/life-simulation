@@ -144,6 +144,7 @@ add_library(lifecore STATIC
   Modules/ParticleModules/SlimeMold.cpp
   Modules/ParticleModules/ParticleLife.cpp
   Modules/ParticleModules/Boids.cpp
+  Modules/ParticleModules/Tracers.cpp
   Modules/RegisterModules.cpp
 )
 

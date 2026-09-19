@@ -34,6 +34,16 @@ public:
                BufferHandle positions, uint32_t count, TextureHandle target,
                uint32_t w, uint32_t h, const Params& p);
 
+    // Lazily creates (if needed) and returns the same density accumulator
+    // buffer encode() uses, for a caller that wants to run its own
+    // accumulate/resolve kernels against it (e.g. SlimeMold's strayGain
+    // overlay, which needs different resolve math than encode()'s built-in
+    // linear one) instead of allocating a second width*height*4 byte buffer
+    // next to it. Pure buffer-lifetime plumbing — encode() itself now calls
+    // this too, unchanged behavior.
+    BufferHandle ensureDensity(CommandGraph& graph, const std::string& labelPrefix,
+                               uint32_t w, uint32_t h);
+
 private:
     BufferHandle density_;
     uint32_t densityWidth_ = 0;
