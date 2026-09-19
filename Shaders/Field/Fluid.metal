@@ -161,7 +161,16 @@ kernel void fluidForces(texture2d<float, access::read> velR [[texture(0)]],
                  - sampleFieldWrap(forceField, pixelPos - float2(e, 0.0f), w, h);
         float gy = sampleFieldWrap(forceField, edgePos(pixelPos + float2(0.0f, e), h, p.wallY), w, h)
                  - sampleFieldWrap(forceField, edgePos(pixelPos - float2(0.0f, e), h, p.wallY), w, h);
-        vel += float2(gx, gy) * p.forceFieldGain;
+        if (p.wallY == 0u) {
+            vel += float2(gx, gy) * p.forceFieldGain;
+        } else {
+            // Next to a wall the trail can only pull from one side, so the
+            // flow converges onto the wall, carries the agents there, and the
+            // whole population collapses onto floor/ceiling. Fade the coupling
+            // out over the outer 15% of the height.
+            float dWall = min(pixelPos.y, world.y - pixelPos.y);
+            vel += float2(gx, gy) * p.forceFieldGain * smoothstep(0.0f, 0.15f * world.y, dWall);
+        }
     }
 
     velW.write(float4(vel, 0.0f, 0.0f), gid);
