@@ -37,9 +37,14 @@ float hashUnit(uint32_t seed, int64_t index) {
 // still guards against it (defensive, e.g. mappings added without going
 // through Scene::parse).
 float evalTimeSource(TimeSourceKind kind, float period, float phase, uint32_t noiseSeed,
-                     float t) {
+                     double t) {
     if (!(period > 0.0f)) return 0.0f;
-    const float x = t / period + phase;
+    // t/period in double, THEN reduce to a fraction of a cycle, THEN narrow.
+    // Doing this in float loses the cycle position after a few hours: near
+    // 28,800 s a float's step is 0.00195 s and the useful bits of x are gone.
+    // Ramp and Noise need the integer part, so they keep the wide value.
+    const double xWide = t / double(period) + double(phase);
+    const float x = float(xWide - std::floor(xWide));
     switch (kind) {
     case TimeSourceKind::Sin:
         return std::sin(kTwoPi * x);
@@ -48,13 +53,13 @@ float evalTimeSource(TimeSourceKind kind, float period, float phase, uint32_t no
         // rising, +1 at quarter cycle, 0 at half, -1 at three-quarters.
         return (2.0f / 3.14159265358979323846f) * std::asin(std::sin(kTwoPi * x));
     case TimeSourceKind::Ramp:
-        return x - std::floor(x);
+        return x;
     case TimeSourceKind::Noise: {
         // Smooth value noise: interpolate between seeded random values at
         // `period`-second knots with a smoothstep — NOT white noise (no
         // per-frame jitter, no discontinuities at the knots).
-        const float idx = std::floor(x);
-        const float frac = x - idx;
+        const double idx = std::floor(xWide);
+        const float frac = float(xWide - idx);
         const float a = hashUnit(noiseSeed, int64_t(idx)) * 2.0f - 1.0f;
         const float b = hashUnit(noiseSeed, int64_t(idx) + 1) * 2.0f - 1.0f;
         const float s = frac * frac * (3.0f - 2.0f * frac);

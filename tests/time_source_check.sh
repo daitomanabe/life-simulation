@@ -101,6 +101,43 @@ else
     FAILED "unknown time source kind was NOT rejected with a message naming the source (exit=$CODE2)"
 fi
 
+# 5. The clock must still be accurate after hours of dt accumulation.
+# A float clock adding 1/60 drifts 2.8 s after one hour and 623 s after eight
+# (near 28,800 s a float's step is 0.00195 s, so ~6% of every dt is rounded
+# away), and stops advancing entirely at 78 h. With a 2 s period one hour of
+# drift is more than a whole cycle, so the ramp value below is a sharp test.
+# ~30 s to run: one simulated hour at 64x64, writing only the last frame.
+echo
+echo "== 5. clock accuracy after one simulated hour (catches a float clock) =="
+LONG="$TMP/long"
+"$BIN" --scene "$SCENE" --width 64 --height 64 --fps 60 --frames 216000 --warmup 215999 \
+    --format none --output "$LONG" --dump-params "$KEYS" >/dev/null 2>&1
+if [ ! -f "$LONG/params.csv" ]; then
+    FAILED "one-hour run produced no params.csv"
+else
+    python3 - "$LONG/params.csv" <<'PY_EOF'
+import csv, sys
+rows = list(csv.reader(open(sys.argv[1])))
+header, last = rows[0], rows[-1]
+frame = int(last[0])
+t = frame / 60.0                      # exact: what the clock SHOULD read
+col = {name: i for i, name in enumerate(header)}
+ramp_col = next(i for name, i in col.items() if "ramp" in name.lower()) \
+    if any("ramp" in n.lower() for n in col) else 3
+got = float(last[ramp_col])
+want = (t / 2.0) % 1.0                # period 2 s, phase 0
+err = abs(got - want)
+err = min(err, 1.0 - err)             # ramp wraps
+if err < 1e-3:
+    print(f"  \033[32mPASS\033[0m ramp at t={t:.4f}s is {got:.6f}, expected {want:.6f} (err {err:.2e})")
+else:
+    print(f"  \033[31mFAIL\033[0m ramp at t={t:.4f}s is {got:.6f}, expected {want:.6f} "
+          f"(err {err:.2e}) -- the clock has drifted; is it still a double?")
+    sys.exit(1)
+PY_EOF
+    if [ $? -eq 0 ]; then PASS_SILENT=1; else FAILED "clock drifted over one simulated hour"; fi
+fi
+
 echo
 if [ "$FAIL" -eq 0 ]; then echo "ALL PASS"; else echo "$FAIL CHECK(S) FAILED"; fi
 exit "$FAIL"
