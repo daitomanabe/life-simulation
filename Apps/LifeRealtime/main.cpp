@@ -140,6 +140,7 @@ int main(int argc, char** argv) {
     std::string syphonName;
     uint32_t syphonFaces = 0; // 0 = off
     std::string faceSizeArg = "6816x864";
+    float faceGrain = 0.0f; // 0 = off (default, true no-op)
     std::string loadStateDir;
     std::string dumpStateDir;
     double dumpStateEvery = 0.0; // seconds, 0 = off
@@ -169,6 +170,11 @@ int main(int argc, char** argv) {
                    "'<syphon> 1'.. for other N; 0 = disabled). Independent of --syphon.");
     app.add_option("--face-size", faceSizeArg,
                    "Per-face Syphon output size as WxH (default 6816x864)");
+    app.add_option("--face-grain", faceGrain,
+                   "Film grain amount for --syphon-faces output, applied per output pixel "
+                   "after the upscale (multiplicative jitter 1 + amount*(rand-0.5), same "
+                   "meaning as a module's relief.grain; default 0 = off, true no-op). Scene "
+                   "relief.grain should be 0 when this is in use — see scenes/room-b*.json.");
     app.add_option("--load-state", loadStateDir,
                    "Warm-start from a --dump-state snapshot directory (LifeOfflineRender or "
                    "this app's own --dump-state). Any failure (missing/corrupt/mismatched "
@@ -250,8 +256,8 @@ int main(int argc, char** argv) {
         // (independent of --syphon otherwise); with no --syphon, servers are
         // named bare "west"/"north"/"east".
 #if defined(LIFE_WITH_SYPHON)
-        runner->addOutputSink(
-            std::make_unique<FaceSyphonSink>(syphonName, syphonFaces, faceOutW, faceOutH));
+        runner->addOutputSink(std::make_unique<FaceSyphonSink>(syphonName, syphonFaces, faceOutW,
+                                                               faceOutH, faceGrain));
 #else
         fprintf(stderr,
                 "[life] --syphon-faces %u requested but this build has LIFE_WITH_SYPHON=OFF\n",

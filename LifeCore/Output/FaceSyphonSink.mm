@@ -19,8 +19,10 @@ struct FacePresentParams {
     float uOffset;
     float uScale;
     float exposure;
+    float grain;
+    uint32_t frame;
 };
-static_assert(sizeof(FacePresentParams) == 5 * 4,
+static_assert(sizeof(FacePresentParams) == 7 * 4,
              "FacePresentParams must stay scalar-packed to match MSL");
 
 // Empty base -> bare "west"/"north"/"east" (or "1".."N"); non-empty base ->
@@ -46,12 +48,13 @@ struct FaceSyphonSink::Impl {
 };
 
 FaceSyphonSink::FaceSyphonSink(std::string baseName, uint32_t faceCount, uint32_t outWidth,
-                              uint32_t outHeight)
+                              uint32_t outHeight, float grainAmount)
     : impl_(std::make_unique<Impl>()),
       baseName_(std::move(baseName)),
       faceCount_(faceCount > 0 ? faceCount : 3),
       outWidth_(outWidth),
-      outHeight_(outHeight) {}
+      outHeight_(outHeight),
+      grainAmount_(grainAmount) {}
 
 FaceSyphonSink::~FaceSyphonSink() { stop(); }
 
@@ -107,9 +110,23 @@ void FaceSyphonSink::publish(CommandGraph& graph, TextureHandle frame) {
         id<MTLCommandBuffer> cb = graph.impl().commandBuffer;
         if (!cb) return;
 
+        // Grain reseed: the engine's own frame counter (CommandGraph::beginFrame
+        // sets this every frame from SceneRunner::frameIndex_ — see
+        // MetalInternal.h / SceneRunner::step), NOT a wall clock, so grain is
+        // reproducible for a given frame index and identical between realtime
+        // and offline playback of the same scene. publish() can see it (already
+        // reads graph.impl().commandBuffer below), so there's no need for a
+        // private counter on this sink. XORed per face with the same
+        // frame-into-seed idiom SceneRunner::step uses for reseeding
+        // (seed ^ (frameIndex * 2654435761u)) so the three walls don't show the
+        // identical noise pattern.
+        const uint32_t frameSeed = graph.impl().frameIndex;
         const float uScale = 1.0f / float(faceCount_);
         for (uint32_t k = 0; k < faceCount_; ++k) {
-            FacePresentParams params{outWidth_, outHeight_, float(k) * uScale, uScale, 1.0f};
+            uint32_t faceSeed = frameSeed ^ (k * 2654435761u);
+            FacePresentParams params{outWidth_,      outHeight_, float(k) * uScale,
+                                     uScale,         1.0f,       grainAmount_,
+                                     faceSeed};
             graph.pass("facePresent." + std::to_string(k))
                 .pipeline("facePresentToBGRA")
                 .read(0, frame)
