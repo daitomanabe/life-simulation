@@ -109,7 +109,7 @@ void ReactionDiffusionModule::encode(SimulationContext& ctx) {
     }
 
     colorMap_.encode(*ctx.graph, instanceName_ + ".colorMap", field_.read(), output_,
-                     width_, height_);
+                     width_, height_, ctx.dt);
 }
 
 } // namespace life

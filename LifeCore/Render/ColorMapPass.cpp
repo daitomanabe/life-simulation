@@ -13,6 +13,16 @@ struct ColorMapScaledParams {
     uint32_t dstWidth;
     uint32_t dstHeight;
 };
+
+// Mirrors ReliefSmoothParams in Shaders/Render/Relief.metal (reliefSmoothField).
+// alpha is precomputed on the CPU from dt/temporalSmoothing so the kernel
+// itself stays a trivial, bit-exact mix.
+struct ReliefSmoothParams {
+    uint32_t width;
+    uint32_t height;
+    float alpha;
+};
+static_assert(sizeof(ReliefSmoothParams) == 3 * 4, "ReliefSmoothParams must stay scalar-packed to match MSL");
 } // namespace
 
 void ColorMapPass::configure(const nlohmann::json& moduleParams) {
@@ -54,6 +64,7 @@ void ColorMapPass::configure(const nlohmann::json& moduleParams) {
         relief.logCurve = r.value("logCurve", relief.logCurve);
         relief.logRange = r.value("logRange", relief.logRange);
         relief.edgeFade = r.value("edgeFade", relief.edgeFade);
+        temporalSmoothing = r.value("temporalSmoothing", temporalSmoothing);
     }
 
     if (!moduleParams.contains("colorMap")) return;
@@ -91,7 +102,7 @@ void ColorMapPass::configure(const nlohmann::json& moduleParams) {
 
 void ColorMapPass::encode(CommandGraph& graph, const std::string& label,
                           TextureHandle field, TextureHandle rgbaOut, uint32_t width,
-                          uint32_t height) {
+                          uint32_t height, float dt) {
     if (reliefEnabled) {
         relief.width = width;
         relief.height = height;
@@ -101,9 +112,43 @@ void ColorMapPass::encode(CommandGraph& graph, const std::string& label,
             relief.lightX = baseLightX_ * std::cos(a) - baseLightY_ * std::sin(a);
             relief.lightY = baseLightX_ * std::sin(a) + baseLightY_ * std::cos(a);
         }
+
+        TextureHandle shadeSrc = field;
+        if (temporalSmoothing > 0.0f) {
+            TextureDesc fd = graph.resources().textureDesc(field);
+            if (!smoothed_.valid() || smoothedWidth_ != fd.width || smoothedHeight_ != fd.height) {
+                if (smoothed_.valid()) smoothed_.destroy();
+                TextureDesc td = fd;
+                td.label = label + ".reliefSmoothed";
+                smoothed_.create(graph.resources(), td);
+                smoothedWidth_ = fd.width;
+                smoothedHeight_ = fd.height;
+                smoothedNeedsSeed_ = true;
+            }
+
+            if (smoothedNeedsSeed_) {
+                // First frame after (re)allocation: seed with the field
+                // itself so the image doesn't fade in from black.
+                graph.copyTexture(field, smoothed_.write());
+                smoothedNeedsSeed_ = false;
+            } else {
+                float alpha = 1.0f - std::exp(-dt / temporalSmoothing);
+                ReliefSmoothParams sp{width, height, alpha};
+                graph.pass(label + ".reliefSmooth")
+                    .pipeline("reliefSmoothField")
+                    .read(0, smoothed_.read())
+                    .read(1, field)
+                    .write(2, smoothed_.write())
+                    .uniforms(0, sp)
+                    .dispatch2D(width, height);
+            }
+            smoothed_.swap();
+            shadeSrc = smoothed_.read();
+        }
+
         graph.pass(label)
             .pipeline("reliefShadeField")
-            .read(0, field)
+            .read(0, shadeSrc)
             .write(1, rgbaOut)
             .uniforms(0, relief)
             .dispatch2D(width, height);

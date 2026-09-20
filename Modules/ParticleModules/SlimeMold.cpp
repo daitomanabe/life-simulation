@@ -191,7 +191,7 @@ void SlimeMoldModule::encode(SimulationContext& ctx) {
     }
 
     colorMap_.encode(*ctx.graph, instanceName_ + ".colorMap", trail_.read(), output_,
-                     width_, height_);
+                     width_, height_, ctx.dt);
 
     // Beads (below) and strayGain (further below) share ONE atomic_uint
     // width*height buffer (ParticleSplatPass::ensureDensity — the same one

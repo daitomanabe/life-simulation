@@ -645,7 +645,7 @@ void LeniaModule::encode(SimulationContext& ctx) {
 
     if (simWidth_ == width_ && simHeight_ == height_) {
         colorMap_.encode(*ctx.graph, instanceName_ + ".colorMap", field_.read(), output_,
-                         width_, height_);
+                         width_, height_, ctx.dt);
     } else {
         colorMap_.encodeScaled(*ctx.graph, instanceName_ + ".colorMap", field_.read(), output_,
                                simWidth_, simHeight_, width_, height_);

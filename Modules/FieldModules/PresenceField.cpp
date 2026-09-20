@@ -111,7 +111,7 @@ void PresenceFieldModule::encode(SimulationContext& ctx) {
     field_.swap();
 
     colorMap_.encode(*ctx.graph, instanceName_ + ".colorMap", field_.read(), output_, width_,
-                     height_);
+                     height_, ctx.dt);
 }
 
 } // namespace life

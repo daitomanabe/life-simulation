@@ -126,3 +126,29 @@ kernel void reliefShadeField(texture2d<float, access::read> field [[texture(0)]]
     float3 rgb = max(v, 0.0f) * float3(p.tintR, p.tintG, p.tintB) * p.exposure;
     dst.write(float4(rgb, presence), gid);
 }
+
+// Optional temporal low-pass for the field reliefShadeField reads (design
+// doc: SlimeMold trail flicker — agents deposit stochastically, so any pixel
+// jitters frame to frame; that jitter reads as sparkle once shaded as a
+// height field). ColorMapPass::encode ping-pongs a persistent texture through
+// this kernel when "relief.temporalSmoothing" > 0, then hands reliefShadeField
+// that smoothed texture instead of the raw field — reliefShadeField above is
+// untouched. alpha = 1 - exp(-dt/tau) is computed on the CPU (fixed sim dt,
+// never a wall clock). Matches life::ReliefSmoothParams (scalar-packed,
+// private to ColorMapPass.cpp).
+struct ReliefSmoothParams {
+    uint width;
+    uint height;
+    float alpha;
+};
+
+kernel void reliefSmoothField(texture2d<float, access::read> prevSmoothed [[texture(0)]],
+                              texture2d<float, access::read> field [[texture(1)]],
+                              texture2d<float, access::write> dst [[texture(2)]],
+                              constant ReliefSmoothParams& p [[buffer(0)]],
+                              uint2 gid [[thread_position_in_grid]]) {
+    if (gid.x >= p.width || gid.y >= p.height) return;
+    float4 prev = prevSmoothed.read(gid);
+    float4 cur = field.read(gid);
+    dst.write(mix(prev, cur, p.alpha), gid);
+}

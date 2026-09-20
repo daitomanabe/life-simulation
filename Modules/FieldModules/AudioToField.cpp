@@ -68,7 +68,7 @@ void AudioToFieldModule::encode(SimulationContext& ctx) {
     field_.swap();
 
     colorMap_.encode(*ctx.graph, instanceName_ + ".colorMap", field_.read(), output_,
-                     width_, height_);
+                     width_, height_, ctx.dt);
 }
 
 } // namespace life

@@ -5,6 +5,7 @@
 // Every field module runs one of these to satisfy the "all outputs are
 // RGBA16F" rule (design doc §13.1).
 
+#include "LifeCore/Field/PingPongTexture.h"
 #include "LifeCore/Metal/CommandGraph.h"
 
 #include <nlohmann/json.hpp>
@@ -60,8 +61,11 @@ public:
     //               "channel": 1, "inputScale": 3.0 }
     void configure(const nlohmann::json& moduleParams);
 
+    // dt: the caller's fixed simulation step (SimulationContext::dt), used
+    // only for the temporalSmoothing low-pass below — never a wall clock, so
+    // offline and realtime rendering agree.
     void encode(CommandGraph& graph, const std::string& label, TextureHandle field,
-                TextureHandle rgbaOut, uint32_t width, uint32_t height);
+                TextureHandle rgbaOut, uint32_t width, uint32_t height, float dt);
 
     // Phase 9 (docs/specs/phase9_lenia_fft.md §1): same palette mapping as
     // encode() above, but field and rgbaOut may differ in size (Lenia's
@@ -85,11 +89,33 @@ public:
     bool reliefEnabled = false;
     ReliefParams relief;
 
+    // "relief": { "temporalSmoothing": <seconds> }, default 0 = off. When >
+    // 0, encode() exponentially low-pass-filters the field over time (time
+    // constant = temporalSmoothing) into a persistent texture before
+    // shading, trading a little motion for a lot less frame-to-frame
+    // sparkle from stochastic sources (e.g. a slime trail's per-agent
+    // deposit noise). The simulation field itself is never touched — only
+    // what this pass shades from. 0 is a true no-op: no texture allocated,
+    // no extra dispatch, byte-identical output. encodeScaled() (Lenia's
+    // separate sim-resolution path) always uses the palette and does not
+    // read this at all.
+    float temporalSmoothing = 0.0f;
+
 private:
     // "lightSpin": degrees per second (at 60 fps) the light turns about the
     // wall normal, so highlights and shadows sweep slowly across the relief.
     float lightSpin_ = 0.0f;
     float baseLightX_ = 0.0f, baseLightY_ = 0.0f;
+
+    // Temporal low-pass accumulator (temporalSmoothing > 0 only). Ping-ponged
+    // like Field2D: read() feeds this frame's shading, write() receives the
+    // updated mix, then swap() — same idiom the simulation fields themselves
+    // use. Allocated lazily (size/format mirrors whatever field encode() is
+    // given) and reallocated if that size changes; released the same way
+    // ParticleSplatPass::ensureDensity releases its old buffer on resize.
+    PingPongTexture smoothed_;
+    uint32_t smoothedWidth_ = 0, smoothedHeight_ = 0;
+    bool smoothedNeedsSeed_ = true;
 };
 
 } // namespace life
