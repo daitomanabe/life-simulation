@@ -231,7 +231,7 @@ void SceneRunner::step(const MusicFeatureState& music, float dt, const StepOptio
     }
     composite_.encode(*graph_, layers, renderTarget_, desc_.scene.width,
                       desc_.scene.height);
-    post_.encode(*graph_, renderTarget_);
+    post_.encode(*graph_, renderTarget_, dt);
 
     // sink-less path costs one empty-vector loop check (design doc phase 6:
     // "sink なしの経路にコストゼロ").

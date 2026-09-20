@@ -130,7 +130,7 @@ private:
     std::unique_ptr<FrameRecorder> recorder_;
     ParameterBus params_;
     CompositePass composite_;
-    PostPass post_; // scene-level "post" block (bloom); no-op without it
+    PostPass post_; // scene-level "post" block (bloom, accumulate); no-op without it
 
     std::vector<std::unique_ptr<SimulationModule>> modules_;
     std::vector<ResolvedConnection> resolvedConnections_;

@@ -63,3 +63,30 @@ kernel void bloomAdd(texture2d<float, access::sample> bloom [[texture(0)]],
     float4 c = target.read(gid);
     target.write(float4(c.rgb + bloom.sample(s, uv).rgb * p.intensity, c.a), gid);
 }
+
+// Output-stage temporal accumulation ("post": { "accumulate": { "seconds":
+// ... } } — life::PostPass). Runs last, after bloom: exponentially low-pass
+// filters the fully composited frame over time, smoothing away everything
+// upstream churns frame to frame (grain, tracer respawns, per-agent trail
+// jitter) at once, rather than any one source. accumPrev/accumNext are
+// life::PostPass's own persistent ping-pong texture (never the simulation's
+// own fields); `target` is the shared render target every output sink reads,
+// so the blended result is written back into it in the same dispatch.
+struct AccumulateParams {
+    uint width;
+    uint height;
+    float alpha; // 1 - exp(-dt / seconds), precomputed on the CPU
+};
+
+kernel void postAccumulate(texture2d<float, access::read> accumPrev [[texture(0)]],
+                           texture2d<float, access::read_write> target [[texture(1)]],
+                           texture2d<float, access::write> accumNext [[texture(2)]],
+                           constant AccumulateParams& p [[buffer(0)]],
+                           uint2 gid [[thread_position_in_grid]]) {
+    if (gid.x >= p.width || gid.y >= p.height) return;
+    float4 prev = accumPrev.read(gid);
+    float4 cur = target.read(gid);
+    float4 mixed = mix(prev, cur, p.alpha);
+    target.write(mixed, gid);
+    accumNext.write(mixed, gid);
+}
