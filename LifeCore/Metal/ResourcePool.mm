@@ -12,6 +12,7 @@ uint32_t bytesPerPixel(PixelFormat f) {
         case PixelFormat::RGBA16F: return 8;
         case PixelFormat::RGBA32F: return 16;
         case PixelFormat::RGBA8: return 4;
+        case PixelFormat::BGRA8Unorm: return 4;
     }
     return 4;
 }
@@ -25,6 +26,7 @@ const char* pixelFormatName(PixelFormat f) {
         case PixelFormat::RGBA16F: return "RGBA16F";
         case PixelFormat::RGBA32F: return "RGBA32F";
         case PixelFormat::RGBA8: return "RGBA8";
+        case PixelFormat::BGRA8Unorm: return "BGRA8Unorm";
     }
     return "?";
 }
@@ -38,6 +40,7 @@ MTLPixelFormat toMTLPixelFormat(PixelFormat f) {
         case PixelFormat::RGBA16F: return MTLPixelFormatRGBA16Float;
         case PixelFormat::RGBA32F: return MTLPixelFormatRGBA32Float;
         case PixelFormat::RGBA8: return MTLPixelFormatRGBA8Unorm;
+        case PixelFormat::BGRA8Unorm: return MTLPixelFormatBGRA8Unorm;
     }
     return MTLPixelFormatRGBA16Float;
 }

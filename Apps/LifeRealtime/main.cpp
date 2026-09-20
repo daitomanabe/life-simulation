@@ -15,6 +15,7 @@
 
 #if defined(LIFE_WITH_SYPHON)
 #include "LifeCore/Output/SyphonSink.h"
+#include "LifeCore/Output/FaceSyphonSink.h"
 #endif
 
 #include <CLI11/CLI11.hpp>
@@ -31,6 +32,15 @@ using namespace life;
 static std::atomic<bool> gRunning{true};
 
 static void onSignal(int) { gRunning.store(false); }
+
+// "6816x864" -> (6816, 864). Same "WxH" convention as LifeBench's --sizes.
+static bool parseSize(const std::string& s, uint32_t& outW, uint32_t& outH) {
+    auto x = s.find('x');
+    if (x == std::string::npos) return false;
+    outW = uint32_t(std::stoul(s.substr(0, x)));
+    outH = uint32_t(std::stoul(s.substr(x + 1)));
+    return outW > 0 && outH > 0;
+}
 
 int main(int argc, char** argv) {
     CLI::App app{"LifeRealtime — headless realtime VJ runner"};
@@ -49,6 +59,8 @@ int main(int argc, char** argv) {
     bool preview = false;
     float previewScale = 0.5f;
     std::string syphonName;
+    uint32_t syphonFaces = 0; // 0 = off
+    std::string faceSizeArg = "6816x864";
 
     app.add_option("--scene", scenePath, "Scene JSON path");
     app.add_option("--shaders", shaderRoot, "Shaders/ directory");
@@ -67,7 +79,18 @@ int main(int argc, char** argv) {
                    "Preview window content size relative to scene resolution (default 0.5)");
     app.add_option("--syphon", syphonName,
                    "Publish frames as a Syphon server with this name (empty = disabled)");
+    app.add_option("--syphon-faces", syphonFaces,
+                   "Publish N per-face Syphon servers ('<syphon> west/north/east' for N=3, "
+                   "'<syphon> 1'.. for other N; 0 = disabled). Independent of --syphon.");
+    app.add_option("--face-size", faceSizeArg,
+                   "Per-face Syphon output size as WxH (default 6816x864)");
     CLI11_PARSE(app, argc, argv);
+
+    uint32_t faceOutW = 0, faceOutH = 0;
+    if (syphonFaces > 0 && !parseSize(faceSizeArg, faceOutW, faceOutH)) {
+        fprintf(stderr, "[life] --face-size expects WxH, got '%s'\n", faceSizeArg.c_str());
+        return 1;
+    }
 
     modules::registerBuiltinModules();
 
@@ -101,6 +124,19 @@ int main(int argc, char** argv) {
         fprintf(stderr,
                 "[life] --syphon '%s' requested but this build has LIFE_WITH_SYPHON=OFF\n",
                 syphonName.c_str());
+#endif
+    }
+    if (syphonFaces > 0) {
+        // Reuses --syphon's name as the base ("<syphon> west" etc) when given
+        // (independent of --syphon otherwise); with no --syphon, servers are
+        // named bare "west"/"north"/"east".
+#if defined(LIFE_WITH_SYPHON)
+        runner->addOutputSink(
+            std::make_unique<FaceSyphonSink>(syphonName, syphonFaces, faceOutW, faceOutH));
+#else
+        fprintf(stderr,
+                "[life] --syphon-faces %u requested but this build has LIFE_WITH_SYPHON=OFF\n",
+                syphonFaces);
 #endif
     }
 

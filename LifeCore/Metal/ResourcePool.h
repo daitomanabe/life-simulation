@@ -22,6 +22,7 @@ enum class PixelFormat {
     RGBA16F,
     RGBA32F,
     RGBA8,
+    BGRA8Unorm, // presentation-only (Syphon/CAMetalLayer face textures); not a sim format
 };
 
 uint32_t bytesPerPixel(PixelFormat f);

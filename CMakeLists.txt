@@ -174,7 +174,10 @@ target_link_libraries(lifecore PUBLIC
 )
 
 if(LIFE_WITH_SYPHON)
-  target_sources(lifecore PRIVATE LifeCore/Output/SyphonSink.mm)
+  target_sources(lifecore PRIVATE
+    LifeCore/Output/SyphonSink.mm
+    LifeCore/Output/FaceSyphonSink.mm
+  )
   target_compile_definitions(lifecore PUBLIC LIFE_WITH_SYPHON=1)
   target_link_libraries(lifecore PUBLIC syphon_vendor)
 endif()
