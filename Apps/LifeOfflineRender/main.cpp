@@ -171,6 +171,7 @@ int main(int argc, char** argv) {
     double fps = 30.0;
     uint32_t frames = 300;
     uint32_t warmup = 0;
+    uint32_t dumpEvery = 1;
     uint32_t substeps = 1;
     int64_t seed = -1;
     float exposure = 1.0f;
@@ -188,6 +189,9 @@ int main(int argc, char** argv) {
     app.add_option("--height", height, "Override scene height");
     app.add_option("--fps", fps, "Simulation frame rate (fixed dt = 1/fps)");
     app.add_option("--frames", frames, "Number of frames to render");
+    app.add_option("--dump-every", dumpEvery,
+                   "Write only every Nth frame (counted from --warmup). For sampling a long "
+                   "run at intervals without writing, or re-simulating, every frame.");
     app.add_option("--warmup", warmup,
                    "Simulate this many of --frames first without writing anything (PNG/EXR/movie/raw). "
                    "For scenes that need time to develop; frame numbering is unchanged.");
@@ -368,7 +372,7 @@ int main(int argc, char** argv) {
 
         std::string pngPath = app::frameFilename(outputDir, "frame", i, "png");
         std::string exrPath = app::frameFilename(outputDir, "frame", i, "exr");
-        const bool out = i >= warmup;
+        const bool out = i >= warmup && (dumpEvery <= 1 || (i - warmup) % dumpEvery == 0);
         bool needPNG = out && writePNG && !(resume && fs::exists(pngPath));
         bool needEXR = out && writeEXR && !(resume && fs::exists(exrPath));
         // movie export needs a readback every frame even on frames where
