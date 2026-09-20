@@ -190,9 +190,15 @@ void SceneRunner::step(const MusicFeatureState& music, float dt, const StepOptio
         // 常時回すと GPU 75ms/frame だが、一度に 1〜2 層しか見せないなら 15ms 台。
         // 生命なので「止めて再開」は嘘になる — 代わりに、再び現れる瞬間に
         // reset() で生まれ直させる。隠れている間の時間経過は演じない。
+        //
+        // Exception: alwaysEncode() modules (pure feeders like PresenceField)
+        // keep encoding while invisible — something else depends on their
+        // named output every frame, so "hidden" must only mean "not
+        // composited", never "stopped". The composite-layers loop below still
+        // gates on layerLiveOpacity_, so they still never contribute pixels.
         const bool appearing = visible && !visibleWasHigh_[i];
         visibleWasHigh_[i] = visible ? 1 : 0;
-        if (!visible) continue;
+        if (!visible && !m->alwaysEncode()) continue;
 
         // reseed: 0.5 を跨いだ立ち上がり、または層が現れた瞬間に再初期化。種は
         // シーン種とフレーム番号から決まるので、同じ入力なら毎回同じ形に生まれ

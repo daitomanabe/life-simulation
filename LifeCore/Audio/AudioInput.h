@@ -8,6 +8,7 @@
 #include "LifeCore/Audio/AudioFeatureState.h"
 #include "LifeCore/Audio/FeatureSmoother.h"
 #include "LifeCore/Audio/OSCReceiver.h"
+#include "LifeCore/Audio/PresenceStore.h"
 
 #include <string>
 
@@ -16,7 +17,8 @@ namespace life {
 class AudioInput {
 public:
     // Starts listening on the given UDP port for the standard address set
-    // (/kick /snare /hihat /perc /beat /fft — design doc §2.1).
+    // (/kick /snare /hihat /perc /beat /fft, plus /presence /presence/clear
+    // for visitor tracking — see AudioInput.cpp's OSC dispatch).
     bool start(uint16_t port, std::string& outError);
     void stop();
 
@@ -30,6 +32,7 @@ public:
 private:
     OSCReceiver osc_;
     FeatureSmoother smoother_;
+    PresenceStore presence_;
     AudioFeatureState state_;
 };
 

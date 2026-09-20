@@ -74,6 +74,16 @@ public:
         (void)port; (void)h; return false;
     }
 
+    // SceneRunner::step normally skips encode() entirely for a layer whose
+    // opacity is ~0 (GPU-saving "hidden layers cost nothing" rule — see
+    // SceneRunner.cpp). A pure feeder module (e.g. PresenceField driving
+    // fluid0.forceField) needs the opposite: its own visibility is only a
+    // debug toggle, and whatever it's connected to must keep receiving
+    // fresh data every frame regardless. Default false preserves every
+    // existing module's exact current behavior; override to true only for
+    // a module that must keep simulating while invisible.
+    virtual bool alwaysEncode() const { return false; }
+
     const std::string& instanceName() const { return instanceName_; }
     bool enabled() const { return enabled_; }
     void setEnabled(bool e) { enabled_ = e; }

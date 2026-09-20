@@ -20,6 +20,36 @@ struct ChannelEnvelope {
     float hold = 0.0f;     // 1.0 while raw >= threshold
 };
 
+// Sensor-agnostic visitor-presence input (design doc: depth-sensor/LiDAR
+// tracking along the wall — hardware not chosen yet, so this only ever
+// carries normalized positions, never a sensor-specific payload). Populated
+// from /presence OSC via LifeCore/Audio/PresenceStore.h, exactly like fft/
+// kick/... are populated from their own addresses via FeatureSmoother.
+//
+// This struct carries RAW per-point data plus its age (seconds since that
+// id was last refreshed, dt-accumulated by PresenceStore — never
+// std::chrono, so replay stays reproducible). It does NOT decide which
+// points still count or whether the input has gone silent — that policy
+// (holdSeconds / watchdogSeconds) belongs to the consuming module
+// (PresenceField), which is configured per scene.
+inline constexpr int kMaxPresencePoints = 64;
+
+struct PresencePoint {
+    uint32_t id = 0;        // from OSC; lets a mover keep identity across frames
+    float x = 0.0f;         // normalized 0..1 along the wall's length (wraps)
+    float y = 0.0f;         // normalized 0..1, 0 = ceiling, 1 = floor (image y-down)
+    float strength = 1.0f;  // OSC's optional 4th float; defaults to 1.0 when absent
+    float age = 0.0f;       // seconds since last refreshed for this id (dt-accumulated)
+};
+
+struct PresenceState {
+    PresencePoint points[kMaxPresencePoints] = {};
+    uint32_t count = 0;                  // populated entries in points[]
+    float secondsSinceMessage = 1.0e9f;  // dt-accumulated time since the last /presence or
+                                         // /presence/clear of any kind ("connection alive?");
+                                         // huge default reads as "never seen one"
+};
+
 struct AudioFeatureState {
     // Primary channels (smoothed values — safe defaults for mappings).
     float kick = 0.0f;
@@ -45,6 +75,18 @@ struct AudioFeatureState {
     // Full envelope sets, addressable from audio mappings as e.g.
     // "kick.trigger", "snare.peak" (plain "kick" == smoothed).
     ChannelEnvelope kickEnv, snareEnv, hihatEnv, percEnv, beatEnv;
+
+    // Visitor presence (see PresenceState above). Reuses this same struct's
+    // plumbing (SceneRunner::step -> module->updateCPU(audio)) instead of a
+    // parallel per-frame channel, so no module signature changes — every
+    // existing module already takes AudioFeatureState and simply ignores
+    // fields it doesn't use, exactly as it does today with fft/kick/etc.
+    // Default-constructed (count 0) for every caller that doesn't run a
+    // live OSC receiver (LifeBench's "silent" state, LifeOfflineRender with
+    // or without --audio, CaptureReplay — none of them populate it), which
+    // is what keeps those paths byte-identical before and after this field
+    // was added.
+    PresenceState presence;
 };
 
 } // namespace life

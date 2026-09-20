@@ -7,6 +7,7 @@
 #include "Modules/FieldModules/CellularAutomata.h"
 #include "Modules/FieldModules/Fluid.h"
 #include "Modules/FieldModules/Lenia.h"
+#include "Modules/FieldModules/PresenceField.h"
 #include "Modules/FieldModules/ReactionDiffusion.h"
 #include "Modules/ParticleModules/Boids.h"
 #include "Modules/ParticleModules/ParticleLife.h"
@@ -24,6 +25,8 @@ void registerBuiltinModules() {
                    [] { return std::make_unique<CellularAutomataModule>(); });
     f.registerType("AudioToField",
                    [] { return std::make_unique<AudioToFieldModule>(); });
+    f.registerType("PresenceField",
+                   [] { return std::make_unique<PresenceFieldModule>(); });
     f.registerType("SlimeMold", [] { return std::make_unique<SlimeMoldModule>(); });
     f.registerType("ParticleLife",
                    [] { return std::make_unique<ParticleLifeModule>(); });

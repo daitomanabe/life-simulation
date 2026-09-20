@@ -112,6 +112,7 @@ add_library(lifecore STATIC
   # Audio
   LifeCore/Audio/OSCReceiver.cpp
   LifeCore/Audio/FeatureSmoother.cpp
+  LifeCore/Audio/PresenceStore.cpp
   LifeCore/Audio/AudioInput.cpp
   # Music (events JSON → 楽曲構造。Audio が「強さ」、こちらが「意味」)
   LifeCore/Music/MusicTimeline.cpp
@@ -142,6 +143,7 @@ add_library(lifecore STATIC
   Modules/FieldModules/CellularAutomata.cpp
   Modules/FieldModules/AudioToField.cpp
   Modules/FieldModules/Fluid.cpp
+  Modules/FieldModules/PresenceField.cpp
   Modules/ParticleModules/SlimeMold.cpp
   Modules/ParticleModules/ParticleLife.cpp
   Modules/ParticleModules/Boids.cpp
