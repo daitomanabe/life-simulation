@@ -336,4 +336,108 @@ bool SceneRunner::dumpState(const std::string& dir, double fps, const std::strin
     return true;
 }
 
+bool SceneRunner::loadState(const std::string& dir, const std::string& scenePath,
+                            std::string& outError) {
+    namespace fs = std::filesystem;
+
+    std::ifstream f(fs::path(dir) / "state.json");
+    if (!f) {
+        outError = "cannot open " + dir + "/state.json";
+        return false;
+    }
+    nlohmann::json meta;
+    try {
+        f >> meta;
+    } catch (const std::exception& e) {
+        outError = "cannot parse " + dir + "/state.json: " + e.what();
+        return false;
+    }
+
+    if (!scenePath.empty()) {
+        std::string want = fs::path(scenePath).filename().string();
+        std::string got = meta.value("sceneFile", std::string());
+        if (!got.empty() && got != want) {
+            outError = "state scene mismatch: running '" + want + "' but snapshot is from '" +
+                       got + "'";
+            return false;
+        }
+    }
+
+    uint32_t w = meta.value("width", 0u);
+    uint32_t h = meta.value("height", 0u);
+    if (w != desc_.scene.width || h != desc_.scene.height) {
+        outError = "state resolution mismatch: scene is " + std::to_string(desc_.scene.width) +
+                   "x" + std::to_string(desc_.scene.height) + ", snapshot is " +
+                   std::to_string(w) + "x" + std::to_string(h);
+        return false;
+    }
+
+    if (!meta.contains("moduleOrder") || !meta["moduleOrder"].is_array() ||
+        !meta.contains("modules") || !meta["modules"].is_object()) {
+        outError = "state.json is missing moduleOrder/modules";
+        return false;
+    }
+    std::vector<std::string> saved = meta["moduleOrder"].get<std::vector<std::string>>();
+    std::vector<std::string> current;
+    for (auto& m : modules_) current.push_back(m->instanceName());
+    {
+        std::vector<std::string> sortedSaved = saved, sortedCurrent = current;
+        std::sort(sortedSaved.begin(), sortedSaved.end());
+        std::sort(sortedCurrent.begin(), sortedCurrent.end());
+        if (sortedSaved != sortedCurrent) {
+            auto join = [](const std::vector<std::string>& v) {
+                std::string s;
+                for (size_t i = 0; i < v.size(); ++i) s += (i ? "," : "") + v[i];
+                return s;
+            };
+            outError = "state module set mismatch: scene has [" + join(current) +
+                       "], snapshot has [" + join(saved) + "]";
+            return false;
+        }
+    }
+
+    SimulationContext ctx;
+    ctx.metal = metal_.get();
+    ctx.resources = resources_.get();
+    ctx.params = &params_;
+    ctx.graph = graph_.get();
+    ctx.frameIndex = frameIndex_;
+    ctx.substeps = desc_.substeps;
+    ctx.width = desc_.scene.width;
+    ctx.height = desc_.scene.height;
+
+    const auto& modulesMeta = meta["modules"];
+    for (size_t i = 0; i < modules_.size(); ++i) {
+        SimulationModule* m = modules_[i].get();
+        const std::string& name = m->instanceName();
+        nlohmann::json mmeta = modulesMeta.contains(name) ? modulesMeta.at(name)
+                                                           : nlohmann::json::object();
+        if (!m->loadState(ctx, dir, mmeta)) {
+            outError = "module '" + name + "' failed to load state (see log above)";
+            return false;
+        }
+
+        // step()'s "layer just became visible" edge detector (visibleWasHigh_)
+        // doesn't know a warm load just happened — left at reset()'s default
+        // 0, it would read as a fresh appearance on the very next step() and
+        // immediately call m->reset() before that step()'s encode(), undoing
+        // everything just loaded. Pre-arm it to whatever step() would itself
+        // compute as "currently visible" right now, so a module that's
+        // already meant to be visible doesn't get treated as newly-appearing
+        // — while one that's genuinely hidden right now is untouched, so it
+        // still gets a fresh reset() the first time it later appears.
+        const float op = params_.value(name + ".opacity", layerOpacities_[i]);
+        visibleWasHigh_[i] = (op > VISIBLE_EPS) ? 1 : 0;
+    }
+
+    uint32_t savedFrame = meta.value("frame", 0u);
+    frameIndex_ = savedFrame + 1;
+    double fps = meta.value("fps", 0.0);
+    simTime_ = fps > 0.0 ? float(double(frameIndex_) / fps) : 0.0f;
+
+    fprintf(stderr, "[life] loadState: warm-started from %s (saved frame %u, resuming at %u)\n",
+            dir.c_str(), savedFrame, frameIndex_);
+    return true;
+}
+
 } // namespace life

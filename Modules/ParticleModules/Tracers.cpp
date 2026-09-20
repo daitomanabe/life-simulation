@@ -4,6 +4,7 @@
 #include "LifeCore/IO/NpyWriter.h"
 #include "LifeCore/Math/Random.h"
 
+#include <cstring>
 #include <vector>
 
 namespace life {
@@ -184,6 +185,91 @@ void TracersModule::dumpState(SimulationContext& ctx, const std::string& dir,
     meta["depthHashConstant"] = kTracerDepthHashConstant;
 
     if (!err.empty()) fprintf(stderr, "[life] %s dumpState: %s\n", instanceName_.c_str(), err.c_str());
+}
+
+bool TracersModule::loadState(SimulationContext& ctx, const std::string& dir,
+                              const nlohmann::json& meta) {
+    uint32_t savedCount = meta.value("particleCount", 0u);
+    if (savedCount != gpuParams_.particleCount) {
+        fprintf(stderr,
+                "[life] %s loadState: particleCount mismatch (scene has %u, snapshot has %u) — "
+                "refusing to load\n",
+                instanceName_.c_str(), gpuParams_.particleCount, savedCount);
+        return false;
+    }
+
+    std::string err;
+    std::vector<float> pos, ageLife;
+    if (!readNPYFloat32(dir + "/" + instanceName_ + ".positions.npy",
+                        {gpuParams_.particleCount, 2u}, pos, err)) {
+        fprintf(stderr, "[life] %s loadState: %s\n", instanceName_.c_str(), err.c_str());
+        return false;
+    }
+    if (!readNPYFloat32(dir + "/" + instanceName_ + ".agelife.npy",
+                        {gpuParams_.particleCount, 2u}, ageLife, err)) {
+        fprintf(stderr, "[life] %s loadState: %s\n", instanceName_.c_str(), err.c_str());
+        return false;
+    }
+
+    auto stageVec2 = [&](const std::vector<float>& src, const char* suffix,
+                         BufferHandle& outStaging) -> bool {
+        BufferDesc bd;
+        bd.size = src.size() * sizeof(float);
+        bd.storage = StorageMode::Shared;
+        bd.label = instanceName_ + ".load" + suffix + "Staging";
+        outStaging = ctx.resources->createBuffer(bd);
+        void* dst = outStaging.valid() ? ctx.resources->bufferContents(outStaging) : nullptr;
+        if (!dst) {
+            fprintf(stderr, "[life] %s loadState: failed to stage %s buffer\n",
+                    instanceName_.c_str(), suffix);
+            return false;
+        }
+        std::memcpy(dst, src.data(), bd.size);
+        return true;
+    };
+
+    BufferHandle posStaging, ageLifeStaging;
+    if (!stageVec2(pos, "Pos", posStaging) || !stageVec2(ageLife, "AgeLife", ageLifeStaging)) {
+        if (posStaging.valid()) ctx.resources->release(posStaging);
+        if (ageLifeStaging.valid()) ctx.resources->release(ageLifeStaging);
+        return false;
+    }
+
+    // Same rationale as SlimeMoldModule::loadState(): re-run the cold-start
+    // init (positions/age-life/randomState + density clear — the exact
+    // passes encode()'s needsInit_ block runs) so nothing reads
+    // uninitialized GPUPrivate memory, then blit the loaded positions/
+    // age-life over the throwaway init values.
+    gpuParams_.seed = seed_;
+    ctx.graph->beginFrame(ctx.frameIndex);
+    ctx.graph->pass(instanceName_ + ".loadInit")
+        .pipeline("tracersInit")
+        .buffer(0, set_.positions())
+        .buffer(1, set_.velocities()) // repurposed: holds age/life
+        .buffer(2, set_.randomState())
+        .uniforms(3, gpuParams_)
+        .dispatch1D(gpuParams_.particleCount);
+    ctx.graph->pass(instanceName_ + ".loadClearDensity")
+        .pipeline("tracersClearDensity")
+        .buffer(0, density_)
+        .uniforms(1, gpuParams_)
+        .dispatch1D(width_ * height_);
+    size_t bytes = size_t(gpuParams_.particleCount) * 8;
+    ctx.graph->copyBufferToBuffer(posStaging, set_.positions(), bytes);
+    ctx.graph->copyBufferToBuffer(ageLifeStaging, set_.velocities(), bytes);
+    ctx.graph->endFrame(true);
+
+    ctx.resources->release(posStaging);
+    ctx.resources->release(ageLifeStaging);
+
+    needsInit_ = false;
+
+    double sum = 0.0;
+    for (size_t i = 0; i < ageLife.size(); i += 2) sum += ageLife[i + 1]; // ageLife = (age, lifespan)
+    double meanLife = ageLife.empty() ? 0.0 : sum / double(ageLife.size() / 2);
+    fprintf(stderr, "[life] %s loadState: warm-started (particles=%u, lifespan.mean=%.4f)\n",
+            instanceName_.c_str(), gpuParams_.particleCount, meanLife);
+    return true;
 }
 
 } // namespace life

@@ -73,6 +73,7 @@ void CommandGraph::endFrame(bool waitUntilCompleted) {
         [cb commit];
         if (waitUntilCompleted) {
             [cb waitUntilCompleted];
+            impl_->lastFrameHadError = (cb.error != nil);
             if (cb.error) {
                 fprintf(stderr, "[life] command buffer error: %s\n",
                         [[cb.error localizedDescription] UTF8String]);
@@ -212,6 +213,8 @@ const std::vector<PassTiming>& CommandGraph::lastPassTimings() const {
 double CommandGraph::lastFrameGPUms() const { return impl_->lastWholeBufferMs; }
 
 uint32_t CommandGraph::lastFramePassCount() const { return impl_->passCountThisFrame; }
+
+bool CommandGraph::lastFrameHadError() const { return impl_->lastFrameHadError; }
 
 MetalContext& CommandGraph::metal() const { return *impl_->ctx; }
 ResourcePool& CommandGraph::resources() const { return *impl_->pool; }

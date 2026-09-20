@@ -85,6 +85,19 @@ public:
     bool dumpState(const std::string& dir, double fps, const std::string& scenePath,
                    std::string& outError);
 
+    // Inverse of dumpState() (LifeRealtime --load-state): reads dir/state.json,
+    // checks it against THIS scene (width/height, module-name set, and —
+    // when scenePath is non-empty — the snapshot's own recorded scene
+    // filename) and FAILS with a clear outError on any mismatch rather than
+    // handing modules data that doesn't belong to them. Only on a fully
+    // matching snapshot does it call every module's loadState() in turn;
+    // any single module failing aborts the whole thing (all-or-nothing —
+    // a half warm-started scene is worse than a clean cold start). Must be
+    // called after create() (i.e. after reset()) and before the first
+    // step(). Never mutates anything on failure.
+    bool loadState(const std::string& dir, const std::string& scenePath,
+                   std::string& outError);
+
     // Register a live output sink (window preview, Syphon, ...). Must be
     // called after create() and before the app's run loop starts stepping.
     // start() runs synchronously here; on failure the sink is discarded

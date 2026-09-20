@@ -29,6 +29,8 @@ public:
     void encode(SimulationContext& ctx) override;
     void dumpState(SimulationContext& ctx, const std::string& dir,
                    nlohmann::json& meta) override;
+    bool loadState(SimulationContext& ctx, const std::string& dir,
+                  const nlohmann::json& meta) override;
     TextureHandle outputTexture() const override { return output_; }
     ParticleSetHandle particles() const override { return set_.handle(); }
 

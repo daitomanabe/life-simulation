@@ -6,6 +6,7 @@
 #include "LifeCore/Sim/SharedTypes.h"
 
 #include <algorithm>
+#include <cstring>
 #include <vector>
 
 namespace life {
@@ -434,6 +435,112 @@ void SlimeMoldModule::dumpState(SimulationContext& ctx, const std::string& dir,
     }
 
     if (!err.empty()) fprintf(stderr, "[life] %s dumpState: %s\n", instanceName_.c_str(), err.c_str());
+}
+
+bool SlimeMoldModule::loadState(SimulationContext& ctx, const std::string& dir,
+                                const nlohmann::json& meta) {
+    uint32_t savedAgentCount = meta.value("agentCount", 0u);
+    if (savedAgentCount != gpuParams_.agentCount) {
+        fprintf(stderr,
+                "[life] %s loadState: agentCount mismatch (scene has %u, snapshot has %u) — "
+                "refusing to load\n",
+                instanceName_.c_str(), gpuParams_.agentCount, savedAgentCount);
+        return false;
+    }
+
+    std::string err;
+    std::vector<float> trail;
+    if (!readNPYFloat32(dir + "/" + instanceName_ + ".trail.npy", {height_, width_}, trail, err)) {
+        fprintf(stderr, "[life] %s loadState: %s\n", instanceName_.c_str(), err.c_str());
+        return false;
+    }
+    std::vector<float> pos;
+    if (!readNPYFloat32(dir + "/" + instanceName_ + ".positions.npy",
+                        {gpuParams_.agentCount, 2u}, pos, err)) {
+        fprintf(stderr, "[life] %s loadState: %s\n", instanceName_.c_str(), err.c_str());
+        return false;
+    }
+
+    // Stage the loaded data CPU-side — uploadTexture()/bufferContents() both
+    // need Shared storage, trail_/positions() are GPUPrivate (same reason
+    // setup()'s attractorFallback_ goes through a Shared staging texture).
+    std::vector<uint16_t> trailHalf(trail.size());
+    for (size_t i = 0; i < trail.size(); ++i) trailHalf[i] = float2half(trail[i]);
+
+    TextureDesc trailStagingDesc;
+    trailStagingDesc.width = width_;
+    trailStagingDesc.height = height_;
+    trailStagingDesc.format = PixelFormat::R16F;
+    trailStagingDesc.storage = StorageMode::Shared;
+    trailStagingDesc.label = instanceName_ + ".loadTrailStaging";
+    TextureHandle trailStaging = ctx.resources->createTexture(trailStagingDesc);
+    if (!trailStaging.valid() ||
+        !ctx.resources->uploadTexture(trailStaging, trailHalf.data(),
+                                      size_t(width_) * bytesPerPixel(PixelFormat::R16F))) {
+        fprintf(stderr, "[life] %s loadState: failed to stage trail texture\n",
+                instanceName_.c_str());
+        if (trailStaging.valid()) ctx.resources->release(trailStaging);
+        return false;
+    }
+
+    BufferDesc posBd;
+    posBd.size = size_t(gpuParams_.agentCount) * 8;
+    posBd.storage = StorageMode::Shared;
+    posBd.label = instanceName_ + ".loadPosStaging";
+    BufferHandle posStaging = ctx.resources->createBuffer(posBd);
+    void* posDst = posStaging.valid() ? ctx.resources->bufferContents(posStaging) : nullptr;
+    if (!posDst) {
+        fprintf(stderr, "[life] %s loadState: failed to stage positions buffer\n",
+                instanceName_.c_str());
+        ctx.resources->release(trailStaging);
+        if (posStaging.valid()) ctx.resources->release(posStaging);
+        return false;
+    }
+    std::memcpy(posDst, pos.data(), posBd.size);
+
+    // One command buffer: re-run the exact cold-start init (positions/
+    // velocities/randomState get a throwaway random seed, trail/deposit get
+    // cleared — the same passes encode()'s needsInit_ block would run) so
+    // nothing downstream ever reads uninitialized GPUPrivate memory, THEN
+    // blit the loaded trail/positions over the top. dumpState() never
+    // captured velocities/randomState (every step recomputes an agent's
+    // heading from sensing + jitter anyway), so those stay at this
+    // throwaway random init — a known, small gap: agents resume in the
+    // right place with a random heading rather than their exact last one.
+    gpuParams_.seed = seed_;
+    ctx.graph->beginFrame(ctx.frameIndex);
+    ctx.graph->pass(instanceName_ + ".loadInit")
+        .pipeline("slimeInit")
+        .buffer(0, set_.positions())
+        .buffer(1, set_.velocities())
+        .buffer(2, set_.randomState())
+        .uniforms(3, gpuParams_)
+        .dispatch1D(gpuParams_.agentCount);
+    ctx.graph->pass(instanceName_ + ".loadClearTrail")
+        .pipeline("slimeClearTrail")
+        .write(0, trail_.read())
+        .uniforms(0, gpuParams_)
+        .dispatch2D(width_, height_);
+    ctx.graph->pass(instanceName_ + ".loadClearDeposit")
+        .pipeline("slimeClearDeposit")
+        .buffer(0, deposit_)
+        .uniforms(1, gpuParams_)
+        .dispatch1D(width_ * height_);
+    ctx.graph->copyTexture(trailStaging, trail_.read());
+    ctx.graph->copyBufferToBuffer(posStaging, set_.positions(), posBd.size);
+    ctx.graph->endFrame(true);
+
+    ctx.resources->release(trailStaging);
+    ctx.resources->release(posStaging);
+
+    needsInit_ = false;
+
+    double sum = 0.0;
+    for (float v : trail) sum += v;
+    double meanTrail = trail.empty() ? 0.0 : sum / double(trail.size());
+    fprintf(stderr, "[life] %s loadState: warm-started (agents=%u, trail.mean=%.5f)\n",
+            instanceName_.c_str(), gpuParams_.agentCount, meanTrail);
+    return true;
 }
 
 } // namespace life

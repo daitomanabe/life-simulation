@@ -57,6 +57,26 @@ public:
         (void)ctx; (void)dir; (void)meta;
     }
 
+    // Inverse of dumpState() (LifeRealtime --load-state): read back whatever
+    // dumpState() wrote for THIS instance from `dir`, using `meta` (this
+    // module's own nested block from state.json, already resolved by
+    // SceneRunner::loadState()), into live GPU state. Called once, right
+    // after setup()+reset() and before the first encode() — implementations
+    // must leave whatever "first encode() does cold-start init" flag they
+    // have cleared, so that first encode() does not immediately overwrite
+    // the freshly loaded data.
+    //
+    // Default no-op returning true (nothing to load — matches dumpState()'s
+    // default no-op). Return false only for a genuine problem (a capacity
+    // that no longer matches the snapshot, a missing/corrupt .npy); the
+    // caller treats any false as "abandon the whole warm start, fall back
+    // to a cold start" rather than applying a partial load.
+    virtual bool loadState(SimulationContext& ctx, const std::string& dir,
+                          const nlohmann::json& meta) {
+        (void)ctx; (void)dir; (void)meta;
+        return true;
+    }
+
     // RGBA16F composited output. Every module — field or particle — must
     // resolve to a texture (§13.1); particles splat, fields color-map.
     virtual TextureHandle outputTexture() const = 0;

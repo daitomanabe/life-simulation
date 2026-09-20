@@ -105,6 +105,7 @@ struct CommandGraph::Impl {
     GPUTimer timer;
     uint32_t passCountThisFrame = 0;
     double lastWholeBufferMs = 0.0;
+    bool lastFrameHadError = false;
 
     Impl(MetalContext& c, ResourcePool& p, PipelineCache& pl)
         : ctx(&c), pool(&p), pipelines(&pl), timer(c) {}

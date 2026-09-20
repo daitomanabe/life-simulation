@@ -86,6 +86,12 @@ public:
     const std::vector<PassTiming>& lastPassTimings() const;
     double lastFrameGPUms() const;
     uint32_t lastFramePassCount() const;
+    // True when the last endFrame(waitUntilCompleted=true) observed a
+    // non-nil MTLCommandBuffer.error (device lost, validation failure, ...).
+    // Liveness self-exit (LifeRealtime --heartbeat) checks this every frame;
+    // false whenever no frame has waited yet, same as the other "last frame"
+    // getters above.
+    bool lastFrameHadError() const;
 
     MetalContext& metal() const;
     ResourcePool& resources() const;
