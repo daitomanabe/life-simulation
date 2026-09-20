@@ -21,6 +21,16 @@ endif()
 # flip OFF to build LifeRealtime/LifeOfflineRender/LifeBench without it.
 option(LIFE_WITH_SYPHON "Build SyphonSink output + SyphonCheck verifier" ON)
 
+# Determinism across GPU generations: Metal's fast math lets the backend pick
+# FMA contraction and approximate transcendentals per generation, so two
+# different Macs can disagree in the last bits. Only a replicated
+# multi-machine render needs that guarantee; it costs about 16% of the frame
+# and changes the picture slightly, so it is off by default.
+option(LIFE_DETERMINISTIC_MATH "Compile shaders with Metal fast math disabled" OFF)
+if(LIFE_DETERMINISTIC_MATH)
+  add_compile_definitions(LIFE_DETERMINISTIC_MATH)
+endif()
+
 add_compile_options(
   "$<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>"
   -Wall -Wextra -Wno-unused-parameter

@@ -67,6 +67,19 @@ bool MetalContext::Impl::compileLibrary(std::string& outError) {
     @autoreleasepool {
         MTLCompileOptions* options = [MTLCompileOptions new];
         options.languageVersion = MTLLanguageVersion3_1;
+#ifdef LIFE_DETERMINISTIC_MATH
+        // Fast math is ON by default, and it lets the Metal backend choose FMA
+        // contraction and approximate transcendentals per GPU generation. That
+        // is fine on one machine, but a replicated multi-machine render needs
+        // the same bits on every node. Turning it off costs about 16% of the
+        // frame and CHANGES the picture slightly, so it is opt-in:
+        //   cmake -B build -DLIFE_DETERMINISTIC_MATH=ON
+        if (@available(macOS 15.0, *)) {
+            options.mathMode = MTLMathModeSafe;
+        } else {
+            options.fastMathEnabled = NO;
+        }
+#endif
         NSError* error = nil;
         NSString* src = [NSString stringWithUTF8String:merged.c_str()];
         id<MTLLibrary> lib = [device newLibraryWithSource:src options:options error:&error];
