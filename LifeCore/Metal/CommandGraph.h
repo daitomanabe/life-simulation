@@ -78,6 +78,9 @@ public:
     // Blit helpers (each runs in its own blit encoder).
     void copyTexture(TextureHandle src, TextureHandle dst);
     void copyTextureToBuffer(TextureHandle src, BufferHandle dst);
+    // GPUPrivate buffer -> Shared buffer readback (dump-state: agent
+    // positions / age-life, which have no texture form). size in bytes.
+    void copyBufferToBuffer(BufferHandle src, BufferHandle dst, size_t size);
 
     // Timing for the last completed frame.
     const std::vector<PassTiming>& lastPassTimings() const;

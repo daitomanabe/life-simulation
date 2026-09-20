@@ -18,7 +18,8 @@ bool PostPass::configure(const nlohmann::json& sceneDoc, ResourcePool& resources
     bloom_.knee = b.value("knee", bloom_.knee);
     bloom_.intensity = b.value("intensity", bloom_.intensity);
     // radius is given in full-res px; the blur runs at quarter res.
-    bloom_.sigma = std::clamp(b.value("radius", 24.0f) / 4.0f, 0.5f, 16.0f);
+    bloomRadiusPx_ = b.value("radius", 24.0f);
+    bloom_.sigma = std::clamp(bloomRadiusPx_ / 4.0f, 0.5f, 16.0f);
 
     TextureDesc td;
     td.width = bloom_.dstWidth;
@@ -68,6 +69,18 @@ void PostPass::encode(CommandGraph& graph, TextureHandle target) {
         .write(1, target)
         .uniforms(0, bloom_)
         .dispatch2D(bloom_.srcWidth, bloom_.srcHeight);
+}
+
+PostPass::BloomInfo PostPass::bloomInfo() const {
+    BloomInfo info;
+    info.enabled = bloomEnabled_;
+    if (!bloomEnabled_) return info;
+    info.threshold = bloom_.threshold;
+    info.knee = bloom_.knee;
+    info.radiusPx = bloomRadiusPx_;
+    info.intensity = bloom_.intensity;
+    info.sigma = bloom_.sigma;
+    return info;
 }
 
 } // namespace life

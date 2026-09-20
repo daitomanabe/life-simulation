@@ -1,6 +1,7 @@
 // Modules/ParticleModules/SlimeMold.cpp
 #include "Modules/ParticleModules/SlimeMold.h"
 
+#include "LifeCore/IO/NpyWriter.h"
 #include "LifeCore/Math/Random.h"
 #include "LifeCore/Sim/SharedTypes.h"
 
@@ -320,6 +321,119 @@ void SlimeMoldModule::encode(SimulationContext& ctx) {
         splat_.encode(*ctx.graph, instanceName_ + ".splat", set_.positions(),
                      gpuParams_.agentCount, output_, width_, height_, sp);
     }
+}
+
+namespace {
+nlohmann::json reliefParamsToJson(const ReliefParams& r) {
+    return {
+        {"channel", r.channel},        {"frame", r.frame},
+        {"inputScale", r.inputScale},  {"heightScale", r.heightScale},
+        {"lightX", r.lightX},          {"lightY", r.lightY},        {"lightZ", r.lightZ},
+        {"ambient", r.ambient},        {"diffuse", r.diffuse},
+        {"specular", r.specular},      {"shininess", r.shininess},  {"rim", r.rim},
+        {"contourFreq", r.contourFreq},{"contourGain", r.contourGain},
+        {"contourWidth", r.contourWidth},
+        {"shadowSteps", r.shadowSteps},{"shadowLength", r.shadowLength},
+        {"shadowStrength", r.shadowStrength},
+        {"tint", {r.tintR, r.tintG, r.tintB}},
+        {"grain", r.grain},            {"exposure", r.exposure},
+        {"logCurve", r.logCurve},      {"logRange", r.logRange},
+        {"edgeFade", r.edgeFade},
+    };
+}
+} // namespace
+
+void SlimeMoldModule::dumpState(SimulationContext& ctx, const std::string& dir,
+                                nlohmann::json& meta) {
+    std::string err;
+
+    // trail.npy: (H, W) float32 — the CURRENT read side (same one colorMap/
+    // relief reads for this frame). R16F texture -> Shared buffer blit ->
+    // half->float on CPU.
+    {
+        BufferDesc bd;
+        bd.size = size_t(width_) * height_ * bytesPerPixel(PixelFormat::R16F);
+        bd.storage = StorageMode::Shared;
+        bd.label = instanceName_ + ".dumpTrailReadback";
+        BufferHandle rb = ctx.resources->createBuffer(bd);
+        ctx.graph->beginFrame(ctx.frameIndex);
+        ctx.graph->copyTextureToBuffer(trail_.read(), rb);
+        ctx.graph->endFrame(true);
+        const uint16_t* half = static_cast<const uint16_t*>(ctx.resources->bufferContents(rb));
+        std::vector<float> trail(size_t(width_) * height_);
+        if (half)
+            for (size_t i = 0; i < trail.size(); ++i) trail[i] = half2float(half[i]);
+        writeNPYFloat32(dir + "/" + instanceName_ + ".trail.npy", trail.data(), trail.size(),
+                        {height_, width_}, err);
+        ctx.resources->release(rb);
+    }
+
+    // positions.npy: (N, 2) float32 — GPUPrivate float2 buffer, already
+    // float32 in memory, so the readback buffer IS the npy payload.
+    {
+        size_t n = gpuParams_.agentCount;
+        BufferDesc bd;
+        bd.size = size_t(n) * 8;
+        bd.storage = StorageMode::Shared;
+        bd.label = instanceName_ + ".dumpPosReadback";
+        BufferHandle rb = ctx.resources->createBuffer(bd);
+        ctx.graph->beginFrame(ctx.frameIndex);
+        ctx.graph->copyBufferToBuffer(set_.positions(), rb, bd.size);
+        ctx.graph->endFrame(true);
+        const float* pos = static_cast<const float*>(ctx.resources->bufferContents(rb));
+        writeNPYFloat32(dir + "/" + instanceName_ + ".positions.npy", pos, n * 2,
+                        {uint32_t(n), 2u}, err);
+        ctx.resources->release(rb);
+    }
+
+    meta["relief"] = reliefParamsToJson(colorMap_.relief);
+    meta["reliefEnabled"] = colorMap_.reliefEnabled;
+    meta["wallY"] = gpuParams_.wallY;
+    meta["agentCount"] = gpuParams_.agentCount;
+
+    // Same effective-stride clamp as encode() (kept in sync by hand, not by
+    // sharing code, since encode()'s bead block is not itself a function —
+    // see life::SlimeMoldModule::encode above for the source of truth).
+    uint32_t beadStride = uint32_t(std::max(0.0f, param(ctx, "beadStride", 0.0f)));
+    float beadRadius = param(ctx, "beadRadius", 5.0f);
+    float beadGain = param(ctx, "beadGain", 1.0f);
+    if (beadStride > 0u) {
+        uint32_t beadCount = (gpuParams_.agentCount + beadStride - 1u) / beadStride;
+        if (beadCount > 65536u) {
+            beadStride = (gpuParams_.agentCount + 65535u) / 65536u;
+        }
+    }
+    meta["beadStride"] = beadStride;
+    meta["beadRadius"] = beadRadius;
+    meta["beadGain"] = beadGain;
+    if (beadStride > 0u) {
+        BeadParams bp;
+        bp.agentCount = gpuParams_.agentCount;
+        bp.stride = beadStride;
+        bp.width = width_;
+        bp.height = height_;
+        bp.wallY = gpuParams_.wallY;
+        bp.radius = beadRadius;
+        if (colorMap_.reliefEnabled) {
+            const auto& r = colorMap_.relief;
+            bp.lightX = r.lightX; bp.lightY = r.lightY; bp.lightZ = r.lightZ;
+            bp.shininess = r.shininess;
+            bp.tintR = r.tintR; bp.tintG = r.tintG; bp.tintB = r.tintB;
+            bp.exposure = r.exposure;
+            bp.edgeFade = r.edgeFade;
+        }
+        bp.exposure *= beadGain;
+        meta["beadParams"] = {
+            {"radius", bp.radius},
+            {"light", {bp.lightX, bp.lightY, bp.lightZ}},
+            {"ambient", bp.ambient}, {"diffuse", bp.diffuse},
+            {"specular", bp.specular}, {"shininess", bp.shininess},
+            {"tint", {bp.tintR, bp.tintG, bp.tintB}},
+            {"exposure", bp.exposure}, {"edgeFade", bp.edgeFade},
+        };
+    }
+
+    if (!err.empty()) fprintf(stderr, "[life] %s dumpState: %s\n", instanceName_.c_str(), err.c_str());
 }
 
 } // namespace life

@@ -21,6 +21,15 @@ public:
                    uint32_t height, std::string& outError);
     void encode(CommandGraph& graph, TextureHandle target);
 
+    // dump-state: the bloom block "as used" (radiusPx is the pre-clamp scene
+    // value; sigma is the derived quarter-res value the shader actually
+    // runs with — clamp(radiusPx/4, 0.5, 16)).
+    struct BloomInfo {
+        bool enabled = false;
+        float threshold = 0.0f, knee = 0.0f, radiusPx = 0.0f, intensity = 0.0f, sigma = 0.0f;
+    };
+    BloomInfo bloomInfo() const;
+
 private:
     // Mirrors BloomParams in Shaders/Render/Post.metal.
     struct BloomParams {
@@ -35,6 +44,7 @@ private:
 
     bool bloomEnabled_ = false;
     BloomParams bloom_;
+    float bloomRadiusPx_ = 24.0f; // pre-clamp scene "radius", kept for dump-state
     TextureHandle quarterA_, quarterB_;
 };
 

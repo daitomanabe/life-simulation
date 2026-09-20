@@ -11,6 +11,16 @@ BlendMode blendModeFromString(const std::string& s) {
     return BlendMode::Add;
 }
 
+const char* blendModeToString(BlendMode m) {
+    switch (m) {
+        case BlendMode::Screen: return "screen";
+        case BlendMode::Multiply: return "multiply";
+        case BlendMode::Max: return "max";
+        case BlendMode::Alpha: return "alpha";
+        default: return "add";
+    }
+}
+
 namespace {
 struct CompositeParams {
     uint32_t mode;

@@ -133,6 +133,7 @@ add_library(lifecore STATIC
   # IO
   LifeCore/IO/ImageWriter.mm
   LifeCore/IO/FrameRecorder.cpp
+  LifeCore/IO/NpyWriter.cpp
   LifeCore/IO/CaptureReplay.cpp
   LifeCore/IO/MovieWriter.mm
   # Modules

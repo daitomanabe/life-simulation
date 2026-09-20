@@ -1,9 +1,12 @@
 // LifeCore/Sim/SceneRunner.cpp
 #include "LifeCore/Sim/SceneRunner.h"
 
+#include "LifeCore/Render/CompositePass.h"
 #include "LifeCore/Sim/ModuleFactory.h"
 
 #include <algorithm>
+#include <filesystem>
+#include <fstream>
 
 namespace life {
 
@@ -257,6 +260,74 @@ bool SceneRunner::dumpPNG(const std::string& path, float exposure,
 
 bool SceneRunner::dumpEXR(const std::string& path, std::string& outError) {
     return recorder_->writeEXR(path, outError);
+}
+
+bool SceneRunner::dumpState(const std::string& dir, double fps, const std::string& scenePath,
+                            std::string& outError) {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    fs::create_directories(dir, ec);
+    if (ec) {
+        outError = "cannot create dump-state dir: " + dir + " (" + ec.message() + ")";
+        return false;
+    }
+
+    // Fresh readback of the render target as-is right now (independent of
+    // whatever --format/--movie/--raw did on the last frame), so --dump-state
+    // works even with none of those set.
+    graph_->beginFrame(frameIndex_);
+    recorder_->encodeReadback(*graph_, renderTarget_);
+    graph_->endFrame(true);
+    recorder_->fetch();
+    if (!recorder_->writeNPY(dir + "/final.npy", outError)) return false;
+
+    nlohmann::json meta;
+    meta["sceneFile"] = fs::path(scenePath).filename().string();
+    meta["frame"] = frameIndex_ > 0 ? frameIndex_ - 1 : 0; // last simulated frame's index
+    meta["width"] = desc_.scene.width;
+    meta["height"] = desc_.scene.height;
+    meta["fps"] = fps;
+    meta["seed"] = desc_.scene.seed;
+
+    auto bloom = post_.bloomInfo();
+    if (bloom.enabled) {
+        meta["post"]["bloom"] = {{"threshold", bloom.threshold}, {"knee", bloom.knee},
+                                 {"radius", bloom.radiusPx},     {"intensity", bloom.intensity},
+                                 {"sigmaQuarterPx", bloom.sigma}};
+    }
+
+    nlohmann::json order = nlohmann::json::array();
+    nlohmann::json modulesMeta = nlohmann::json::object();
+    for (size_t i = 0; i < modules_.size(); ++i) {
+        SimulationModule* m = modules_[i].get();
+        order.push_back(m->instanceName());
+
+        SimulationContext ctx;
+        ctx.metal = metal_.get();
+        ctx.resources = resources_.get();
+        ctx.params = &params_;
+        ctx.graph = graph_.get();
+        ctx.frameIndex = frameIndex_;
+        ctx.substeps = desc_.substeps;
+        ctx.width = desc_.scene.width;
+        ctx.height = desc_.scene.height;
+
+        nlohmann::json mmeta = nlohmann::json::object();
+        m->dumpState(ctx, dir, mmeta);
+        mmeta["blend"] = blendModeToString(layerModes_[i]);
+        mmeta["opacity"] = layerLiveOpacity_[i];
+        modulesMeta[m->instanceName()] = mmeta;
+    }
+    meta["moduleOrder"] = order;
+    meta["modules"] = modulesMeta;
+
+    std::ofstream f(fs::path(dir) / "state.json");
+    if (!f) {
+        outError = "cannot write " + dir + "/state.json";
+        return false;
+    }
+    f << meta.dump(2) << "\n";
+    return true;
 }
 
 } // namespace life

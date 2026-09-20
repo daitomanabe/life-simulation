@@ -25,6 +25,8 @@ public:
     void reset(uint32_t seed) override;
     void updateCPU(const AudioFeatureState& audio) override;
     void encode(SimulationContext& ctx) override;
+    void dumpState(SimulationContext& ctx, const std::string& dir,
+                   nlohmann::json& meta) override;
     TextureHandle outputTexture() const override { return output_; }
     ParticleSetHandle particles() const override { return set_.handle(); }
 

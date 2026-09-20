@@ -28,6 +28,9 @@ public:
 
     bool writePNG(const std::string& path, float exposure, std::string& outError);
     bool writeEXR(const std::string& path, std::string& outError);
+    // dump-state: exposure-independent raw linear RGBA float32 (H,W,4) .npy,
+    // for byte-for-byte Python-side parity checks against the render.
+    bool writeNPY(const std::string& path, std::string& outError);
 
     uint32_t width() const { return width_; }
     uint32_t height() const { return height_; }

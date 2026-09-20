@@ -1,6 +1,7 @@
 // Modules/ParticleModules/Tracers.cpp
 #include "Modules/ParticleModules/Tracers.h"
 
+#include "LifeCore/IO/NpyWriter.h"
 #include "LifeCore/Math/Random.h"
 
 #include <vector>
@@ -142,6 +143,47 @@ void TracersModule::encode(SimulationContext& ctx) {
         .write(0, output_)
         .uniforms(1, rp)
         .dispatch2D(width_, height_);
+}
+
+// Matches Shaders/Particle/Tracers.metal's tracerDepth() hash constant
+// ("TRAC" tag) — Python needs this to reproduce the per-particle depth z.
+static constexpr uint32_t kTracerDepthHashConstant = 0x54524143u;
+
+void TracersModule::dumpState(SimulationContext& ctx, const std::string& dir,
+                              nlohmann::json& meta) {
+    std::string err;
+    size_t n = gpuParams_.particleCount;
+
+    // positions.npy / agelife.npy: (N, 2) float32. Both buffers are already
+    // float2 in GPUPrivate memory, so the Shared readback copy IS the npy
+    // payload (no per-element conversion needed).
+    auto dumpVec2Buffer = [&](BufferHandle src, const char* suffix) {
+        BufferDesc bd;
+        bd.size = size_t(n) * 8;
+        bd.storage = StorageMode::Shared;
+        bd.label = instanceName_ + ".dump" + suffix + "Readback";
+        BufferHandle rb = ctx.resources->createBuffer(bd);
+        ctx.graph->beginFrame(ctx.frameIndex);
+        ctx.graph->copyBufferToBuffer(src, rb, bd.size);
+        ctx.graph->endFrame(true);
+        const float* data = static_cast<const float*>(ctx.resources->bufferContents(rb));
+        writeNPYFloat32(dir + "/" + instanceName_ + "." + suffix + ".npy", data, n * 2,
+                        {uint32_t(n), 2u}, err);
+        ctx.resources->release(rb);
+    };
+    dumpVec2Buffer(set_.positions(), "positions");
+    dumpVec2Buffer(set_.velocities(), "agelife"); // repurposed buffer (see header)
+
+    meta["gain"] = param(ctx, "gain", 0.9f);
+    meta["density"] = param(ctx, "density", 0.6f);
+    meta["tint"] = {tintR_, tintG_, tintB_};
+    meta["edgeFade"] = param(ctx, "edgeFade", 36.0f);
+    meta["bokehRadius"] = param(ctx, "bokehRadius", 3.5f);
+    meta["wallY"] = gpuParams_.wallY;
+    meta["particleCount"] = gpuParams_.particleCount;
+    meta["depthHashConstant"] = kTracerDepthHashConstant;
+
+    if (!err.empty()) fprintf(stderr, "[life] %s dumpState: %s\n", instanceName_.c_str(), err.c_str());
 }
 
 } // namespace life

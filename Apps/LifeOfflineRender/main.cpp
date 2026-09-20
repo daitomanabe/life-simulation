@@ -180,6 +180,7 @@ int main(int argc, char** argv) {
     float movieQuality = 0.9f;
     std::string rawOut;
     std::string dumpParams;
+    std::string dumpStateDir;
 
     app.add_option("--scene", scenePath, "Scene JSON path");
     app.add_option("--shaders", shaderRoot, "Shaders/ directory");
@@ -205,6 +206,10 @@ int main(int argc, char** argv) {
     app.add_option("--raw", rawOut,
                    "Stream frames as headerless 8-bit luma (w*h bytes each). "
                    "'-' writes to stdout. Logs always go to stderr.");
+    app.add_option("--dump-state", dumpStateDir,
+                   "After the LAST simulated frame, write the GPU state needed to "
+                   "re-draw it (trail fields, agent positions, render params, "
+                   "final.npy) into this directory, for the Python print renderer.");
     app.add_option("--dump-params", dumpParams,
                    "Comma-separated ParameterBus keys (e.g. lenia0.growthMu,"
                    "slime0.moveSpeed). Writes <output>/params.csv, one row per "
@@ -411,6 +416,14 @@ int main(int argc, char** argv) {
                     i + 1, frames, 100.0 * (i + 1) / frames, sec,
                     gpuMsSum / (i + 1));
         }
+    }
+
+    if (!dumpStateDir.empty()) {
+        std::string derr;
+        if (!runner->dumpState(dumpStateDir, fps, scenePath, derr))
+            fprintf(stderr, "[life] dump-state: %s\n", derr.c_str());
+        else
+            fprintf(stderr, "[life] dump-state: wrote %s\n", dumpStateDir.c_str());
     }
 
     // Metadata snapshot for reproducibility (design doc §17.2).

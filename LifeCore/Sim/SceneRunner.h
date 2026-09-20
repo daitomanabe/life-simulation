@@ -76,6 +76,15 @@ public:
     bool dumpPNG(const std::string& path, float exposure, std::string& outError);
     bool dumpEXR(const std::string& path, std::string& outError);
 
+    // Print-image pipeline (--dump-state): after the LAST simulated frame,
+    // write state.json (scene/frame/fps/seed/bloom/module order + per-module
+    // meta), final.npy (raw linear RGBA render target) and every module's
+    // own dump (trail fields, agent positions, ...) into `dir`. fps and
+    // scenePath are metadata this class doesn't otherwise track (fps is a
+    // CLI-only concept; scenePath is recorded as its basename only).
+    bool dumpState(const std::string& dir, double fps, const std::string& scenePath,
+                   std::string& outError);
+
     // Register a live output sink (window preview, Syphon, ...). Must be
     // called after create() and before the app's run loop starts stepping.
     // start() runs synchronously here; on failure the sink is discarded

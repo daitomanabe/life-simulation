@@ -2,6 +2,7 @@
 #include "LifeCore/IO/FrameRecorder.h"
 
 #include "LifeCore/IO/ImageWriter.h"
+#include "LifeCore/IO/NpyWriter.h"
 
 #include <cstring>
 
@@ -61,6 +62,16 @@ bool FrameRecorder::writeEXR(const std::string& path, std::string& outError) {
         return false;
     }
     return writeEXRFromHalfRGBA(path, pixels_.data(), width_, height_, outError);
+}
+
+bool FrameRecorder::writeNPY(const std::string& path, std::string& outError) {
+    if (pixels_.empty()) {
+        outError = "no readback data (call encodeReadback + fetch first)";
+        return false;
+    }
+    std::vector<float> rgba(pixels_.size());
+    for (size_t i = 0; i < pixels_.size(); ++i) rgba[i] = half2float(pixels_[i]);
+    return writeNPYFloat32(path, rgba.data(), rgba.size(), {height_, width_, 4u}, outError);
 }
 
 } // namespace life

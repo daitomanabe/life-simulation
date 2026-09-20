@@ -192,6 +192,19 @@ void CommandGraph::copyTextureToBuffer(TextureHandle src, BufferHandle dst) {
     }
 }
 
+void CommandGraph::copyBufferToBuffer(BufferHandle src, BufferHandle dst, size_t size) {
+    if (!impl_->open) return;
+    @autoreleasepool {
+        id<MTLBuffer> s = impl_->pool->impl().buffer(src);
+        id<MTLBuffer> d = impl_->pool->impl().buffer(dst);
+        if (!s || !d) return;
+        id<MTLBlitCommandEncoder> blit = [impl_->commandBuffer blitCommandEncoder];
+        blit.label = @"copyBufferToBuffer";
+        [blit copyFromBuffer:s sourceOffset:0 toBuffer:d destinationOffset:0 size:size];
+        [blit endEncoding];
+    }
+}
+
 const std::vector<PassTiming>& CommandGraph::lastPassTimings() const {
     return impl_->timer.lastFrameTimings();
 }

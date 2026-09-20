@@ -45,6 +45,18 @@ public:
     virtual void updateCPU(const AudioFeatureState& audio) = 0;
     virtual void encode(SimulationContext& ctx) = 0;
 
+    // Print-image pipeline (LifeOfflineRender --dump-state): after the LAST
+    // simulated frame, write whatever GPU state a faithful CPU/Python re-draw
+    // of that exact frame needs (trail fields, agent positions, the render
+    // params actually in effect) into `dir`, and fill `meta` with those
+    // params as JSON (SceneRunner::dumpState nests it under the module's
+    // instance name in state.json). Default no-op — only modules that
+    // contribute pixels to the print image need to implement this.
+    virtual void dumpState(SimulationContext& ctx, const std::string& dir,
+                           nlohmann::json& meta) {
+        (void)ctx; (void)dir; (void)meta;
+    }
+
     // RGBA16F composited output. Every module — field or particle — must
     // resolve to a texture (§13.1); particles splat, fields color-map.
     virtual TextureHandle outputTexture() const = 0;

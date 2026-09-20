@@ -19,6 +19,7 @@ enum class BlendMode : uint32_t {
 };
 
 BlendMode blendModeFromString(const std::string& s);
+const char* blendModeToString(BlendMode m); // for dump-state JSON
 
 struct CompositeLayer {
     TextureHandle texture;
