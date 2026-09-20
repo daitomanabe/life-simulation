@@ -33,6 +33,10 @@ struct Scene {
     uint32_t width = 1920;
     uint32_t height = 1080;
     std::vector<ModuleSpec> modules;
+    // audioMappings, musicMappings と automation は JSON では別の3つの
+    // トップレベルキーだが（意図の宣言のため）、Scene::parse は同じ
+    // readMappings ヘルパーでこの1本の vector に読み込む。ParameterBus は
+    // source 文字列だけで音・レーン・セクション・イベント・時間を見分ける。
     std::vector<AudioMappingSpec> audioMappings;
     std::vector<ConnectionSpec> connections;
     nlohmann::json raw; // full document (for metadata snapshots)

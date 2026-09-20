@@ -29,6 +29,19 @@ enum class MappingMode : uint32_t {
 
 MappingMode mappingModeFromString(const std::string& s);
 
+// "time.*" のソース種別。None は「time. で始まらない = 時間ソースではない」。
+enum class TimeSourceKind : uint32_t { None = 0, Sin, Tri, Ramp, Noise };
+
+// "time.<kind>:<period>[@<phase>]" を解析する（AudioMappingSpec の source
+// 文法コメント参照）。`source` が "time." で始まらないなら outKind に None
+// を入れて true を返す（検証対象外）。"time." で始まるのに種別不明・period
+// が正の数として読めない・phase が数として読めない、のいずれかなら false と
+// 共に、その source 文字列を含む説明を outError に入れる。シーン読み込み時に
+// これを呼んで false なら読み込みそのものを失敗させる — 壊れた period を
+// 黙って 0 にはしない。
+bool parseTimeSource(const std::string& source, TimeSourceKind& outKind, float& outPeriod,
+                      float& outPhase, std::string& outError);
+
 struct AudioMappingSpec {
     // source 文法:
     //   音（AudioFeatureState 由来 — live OSC / capture.jsonl）
@@ -39,7 +52,7 @@ struct AudioMappingSpec {
     //   セクション
     //     "section.energy" "section.progress" "section.changed"
     //     "section.is:coda"   → role が一致する間 1.0
-    //     "section.n:2"       → 3 番目のセクションの間 1.0（同じ role が続く曲用）
+    //     "section.n:2"       → 3 番目のセクションの間 1.0（同じ役が続く曲用）
     //
     // target の "<module>.opacity" は SceneRunner が毎フレーム読む。これで
     // セクションごとに「どの生命を見せるか」を切り替えられる。
@@ -48,6 +61,23 @@ struct AudioMappingSpec {
     //     "event:granular_freeze.started"   → 開始フレームのみ 1.0
     //     "event:granular_freeze.progress"  → 0..1
     //     "event:warp_filter.cutoff_hz"     → そのイベント自身の 60fps 曲線
+    //   時間（TIME — 音声/イベント JSON 不要。ParameterBus が dt を積算する
+    //   自前の時計だけから決まるので、オフラインでもリアルタイムでも同じ dt
+    //   列なら bit-exact に再現できる。無人インスタレーションで「一定の力を
+    //   ずっと」を避け、ゆっくり強弱・反転させたいときに使う）
+    //     "time.sin:<period>"    正弦、-1..1、1 周期 = <period> 秒
+    //     "time.tri:<period>"    三角波、-1..1
+    //     "time.ramp:<period>"   のこぎり波、0..1
+    //     "time.noise:<period>"  滑らかな値ノイズ、-1..1。<period> 秒おきに
+    //                            シード済み乱数を smoothstep で補間する
+    //                            （白色ノイズではない）
+    //   <period> は正の秒数。壊れた／0 以下の値はシーン読み込み時にその
+    //   source 文字列ごと明確なエラーで弾く（黙って 0 を出さない）。
+    //   任意で位相オフセットを "@<0..1>" で付けられる（既定 0）:
+    //     "time.sin:600@0.25"  → 1/4 周期分オフセットして始まる
+    //   time.noise はシーンの seed と source 文字列自身のハッシュから種を
+    //   作るので、同じシーン内の複数の time.noise は互いに無相関だが、
+    //   同じシーン・同じ seed なら常に同じ列を再現する。
     std::string source;
     std::string target;  // "rd0.feed"
 
@@ -72,6 +102,11 @@ public:
 
     void addMapping(const AudioMappingSpec& spec);
     const std::vector<AudioMappingSpec>& mappings() const { return mappings_; }
+
+    // シーンの seed。addMapping() が "time.noise" の種を派生させるのに使う
+    // ので、time.noise なマッピングを足す前に呼ぶこと（Scene::applyBaseParams
+    // はそうしている）。呼ばなければ 0 固定 — それでも決定的。
+    void setSeed(uint32_t seed) { seed_ = seed; }
 
     // 音のみ（従来経路。既存プリセットと live OSC はここを通る）。
     void update(const AudioFeatureState& audio, float dt);
@@ -108,6 +143,12 @@ private:
         // 最初の update では平滑化せず目標値を直接入れる。0 から立ち上げると、
         // mode:set のマッピング（growthMu など）が冒頭の数秒だけ 0 付近に沈む。
         bool primed = false;
+        // spec.source が "time.*" なら addMapping() 時点で解析済み。毎フレーム
+        // 文字列を見なくていいのと、"time." で始まらない他ソースと分岐できる。
+        TimeSourceKind timeKind = TimeSourceKind::None;
+        float timePeriod = 0.0f;
+        float timePhase = 0.0f;
+        uint32_t noiseSeed = 0; // time.noise 専用。 deriveSeed(seed_, hash(source))
     };
 
     std::unordered_map<std::string, float> base_;
@@ -117,6 +158,11 @@ private:
     std::unordered_map<std::string, float> overrides_;
     std::vector<AudioMappingSpec> mappings_;
     std::vector<MappingState> mappingStates_;
+    uint32_t seed_ = 0;
+    // bus 自身が dt を積算する時計。time.* ソースはこれだけを見る — オーディオ
+    // にも events JSON にも依存しない。SceneRunner::simTime_ と同じ dt 列で
+    // 同じように 0 から進むので、両者は常に一致する。
+    float clockTime_ = 0.0f;
 };
 
 } // namespace life

@@ -1,0 +1,34 @@
+{
+  "_note": [
+    "tests/time_source_check.sh 専用。時間ソース (time.sin/tri/ramp/noise) の",
+    "数値検証だけが目的なので、module は最小・低解像度。probe.* という",
+    "target はどの module にも属さない — ParameterBus.value() は文字列キーで",
+    "引くだけなので、それで足りる（--dump-params の検証にはこれで十分）。"
+  ],
+  "seed": 777,
+  "resolution": [64, 64],
+  "modules": [
+    {
+      "type": "Lenia",
+      "name": "lenia0",
+      "enabled": true,
+      "params": {
+        "radius": 5,
+        "dt": 0.1,
+        "growthMu": 0.15,
+        "growthSigma": 0.017,
+        "initCoverage": 0.3,
+        "initScale": 8.0,
+        "blend": "add",
+        "opacity": 1.0,
+        "colorMap": { "palette": "mono", "channel": 0, "inputScale": 1.0 }
+      }
+    }
+  ],
+  "automation": [
+    { "source": "time.sin:2",   "target": "probe.sin",   "scale": 1.0 },
+    { "source": "time.tri:2",   "target": "probe.tri",   "scale": 1.0 },
+    { "source": "time.ramp:2",  "target": "probe.ramp",  "scale": 1.0 },
+    { "source": "time.noise:2", "target": "probe.noise", "scale": 1.0 }
+  ]
+}

@@ -43,9 +43,10 @@ std::optional<Scene> Scene::parse(const nlohmann::json& j, std::string& outError
             }
             scene.modules.push_back(std::move(spec));
         }
-        // audioMappings と musicMappings は同じ形。分けてあるのは意図の宣言の
-        // ためで、どちらに書いても同じ経路を通る（ParameterBus が source 名で
-        // 音・レーン・セクション・イベントを見分ける）。
+        // audioMappings・musicMappings・automation は同じ形。3つに分けてある
+        // のは意図の宣言のためで（音リアクティブ／曲の構成／時間駆動）、どれに
+        // 書いても同じ経路を通る（ParameterBus が source 名だけで音・レーン・
+        // セクション・イベント・時間を見分ける）。
         auto readMappings = [&](const char* key) -> bool {
             for (const auto& a : j.value(key, nlohmann::json::array())) {
                 AudioMappingSpec spec;
@@ -61,12 +62,23 @@ std::optional<Scene> Scene::parse(const nlohmann::json& j, std::string& outError
                     outError = std::string(key) + " entry missing source/target";
                     return false;
                 }
+                // "time.*" ソースはここで検証する。壊れた／0 以下の period を
+                // 読み込み時に弾く — 黙って 0 を出す automation は、8 時間
+                // ノンストップで動くこの手のシーンでは気づかれない。
+                TimeSourceKind timeKind;
+                float timePeriod, timePhase;
+                std::string timeErr;
+                if (!parseTimeSource(spec.source, timeKind, timePeriod, timePhase, timeErr)) {
+                    outError = std::string(key) + ": " + timeErr;
+                    return false;
+                }
                 scene.audioMappings.push_back(std::move(spec));
             }
             return true;
         };
         if (!readMappings("audioMappings")) return std::nullopt;
         if (!readMappings("musicMappings")) return std::nullopt;
+        if (!readMappings("automation")) return std::nullopt;
         for (const auto& c : j.value("connections", nlohmann::json::array())) {
             ConnectionSpec spec;
             spec.from = c.value("from", "");
@@ -82,6 +94,9 @@ std::optional<Scene> Scene::parse(const nlohmann::json& j, std::string& outError
 }
 
 void Scene::applyBaseParams(ParameterBus& bus) const {
+    // time.noise マッピングが種を派生させるのに要る。addMapping() より前に
+    // 設定すること。
+    bus.setSeed(seed);
     for (const auto& m : modules) {
         for (auto it = m.params.begin(); it != m.params.end(); ++it) {
             if (it.value().is_number()) {
